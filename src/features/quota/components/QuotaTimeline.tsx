@@ -365,7 +365,7 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
           {lane.limits.map((limit) => (
             <span key={limit.label} className={styles.laneLimit}>
               {lane.provider === 'meta' ? t(limit.label) : limit.label}{' '}
-              <b>{shownPercent(limit.remaining, displayMode)}%</b>
+              <b>{Math.round(shownPercent(limit.remaining, displayMode))}%</b>
             </span>
           ))}
         </div>
