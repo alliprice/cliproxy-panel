@@ -18,6 +18,7 @@ import { getApiCallErrorMessage } from '@/services/api';
 import { isClaudeOAuthScopeError, normalizeClaudeUsageSnapshot } from '@/services/api/claudeUsage';
 import { requestUpstream, upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import {
+  CLAUDE_CLOUD_SESSION_CREDIT_KEY,
   CLAUDE_PROFILE_URL,
   CLAUDE_USAGE_URL,
   CLAUDE_REQUEST_HEADERS,
@@ -69,11 +70,6 @@ const findFableUsageLimit = (payload: ClaudeUsagePayload) => {
   return candidates.find((limit) => limit.is_active === true) ?? candidates[0] ?? null;
 };
 
-const isDollarDenominatedWindow = (window: ClaudeUsageWindow) =>
-  normalizeNumberValue(window.limit_dollars) !== null ||
-  normalizeNumberValue(window.used_dollars) !== null ||
-  normalizeNumberValue(window.remaining_dollars) !== null;
-
 export const buildClaudeQuotaWindows = (
   payload: ClaudeUsagePayload,
   t: TFunction
@@ -85,20 +81,6 @@ export const buildClaudeQuotaWindows = (
     const window = payload[key as keyof ClaudeUsagePayload];
     if (!window || typeof window !== 'object' || !('utilization' in window)) continue;
     const typedWindow = window as ClaudeUsageWindow;
-    const isCreditPool = key === 'iguana_necktie' && isDollarDenominatedWindow(typedWindow);
-    if (key === 'iguana_necktie' && fableLimit && !isCreditPool) continue;
-    if (isCreditPool) {
-      windows.push({
-        id: 'cloud-session-credits',
-        label: t('claude_quota.cloud_session_credits'),
-        labelKey: 'claude_quota.cloud_session_credits',
-        usedPercent: normalizeNumberValue(typedWindow.utilization),
-        resetLabel: formatQuotaResetTime(typedWindow.resets_at ?? undefined),
-        resetAtMs: resolveResetMs([typedWindow.resets_at]),
-        periodHours: null,
-      });
-      continue;
-    }
     const usedPercent = normalizeNumberValue(typedWindow.utilization);
     const resetLabel = formatQuotaResetTime(typedWindow.resets_at ?? undefined);
     windows.push({
@@ -111,6 +93,21 @@ export const buildClaudeQuotaWindows = (
       // key: `five_hour` is the rolling window, everything else is weekly.
       resetAtMs: resolveResetMs([typedWindow.resets_at]),
       periodHours: claudePeriodHours(key),
+    });
+  }
+
+  // The cloud-session credit expires rather than resets, so it has no period.
+  // With full dollar amounts it renders as a balance instead (fetchClaudeQuota).
+  const credit = payload[CLAUDE_CLOUD_SESSION_CREDIT_KEY];
+  if (credit && typeof credit === 'object' && 'utilization' in credit) {
+    windows.push({
+      id: 'cloud-session-credits',
+      label: t('claude_quota.cloud_session_credits'),
+      labelKey: 'claude_quota.cloud_session_credits',
+      usedPercent: normalizeNumberValue(credit.utilization),
+      resetLabel: formatQuotaResetTime(credit.resets_at ?? undefined),
+      resetAtMs: resolveResetMs([credit.resets_at]),
+      periodHours: null,
     });
   }
 
@@ -244,7 +241,7 @@ const fetchClaudeQuota = async (file: AuthFileItem, t: TFunction): Promise<Claud
   const windows = buildClaudeQuotaWindows(payload, t).filter(
     (window) =>
       window.id !== 'cloud-session-credits' ||
-      !dollarWindows.some((balance) => balance.key === 'iguana_necktie')
+      !dollarWindows.some((balance) => balance.key === CLAUDE_CLOUD_SESSION_CREDIT_KEY)
   );
   const planType =
     profileResult.status === 'fulfilled' &&

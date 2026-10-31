@@ -517,6 +517,7 @@
     "dollar_balance_remaining": "{{amount}} remaining",
     "balance_reset": "Resets",
     "balance_reset_unknown": "Not provided",
+    "credit_expires": "Expires",
     "stale_snapshot": "Refresh failed. Showing last successful check: {{time}}",
     "usage_scope_missing": "Live usage unavailable: this setup token lacks the user:profile scope",
     "plan_label": "Plan",

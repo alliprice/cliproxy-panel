@@ -222,14 +222,24 @@ describe('Claude quota usage reads', () => {
   });
 
   test('keeps dollar-balance recovery after the fixture plan windows have expired', async () => {
+    const balanceReset = '2026-11-03T00:00:00Z';
     apiCallApi.request = async (request) =>
-      request.url === CLAUDE_USAGE_URL ? result(200, fixture) : result(200, null);
+      request.url === CLAUDE_USAGE_URL
+        ? result(200, {
+            ...fixture,
+            additional_credit_balance: {
+              ...fixture.additional_credit_balance,
+              resets_at: balanceReset,
+            },
+          })
+        : result(200, null);
     const state = CLAUDE_CONFIG.buildSuccessState(
       await CLAUDE_CONFIG.fetchQuota(file, translations.t)
     );
     expect(state.windows.map((window) => window.id)).not.toContain('cloud-session-credits');
+    // The cloud-session credit expires on 2026-11-01; an expiry returns no capacity.
     expect(nextRecoveryMs('claude', state, Date.parse('2026-10-31T00:00:00Z'))).toBe(
-      Date.parse('2026-11-01T00:00:00Z')
+      Date.parse(balanceReset)
     );
   });
 
@@ -256,7 +266,7 @@ describe('Claude quota usage reads', () => {
     );
   });
 
-  test('preserves legacy Fable-only payloads and partial credit pools', async () => {
+  test('shows iguana_necktie without full dollar amounts as cloud session credits', async () => {
     for (const window of [
       { utilization: 41, resets_at: fixture.seven_day.resets_at },
       { utilization: 5, remaining_dollars: 95, resets_at: fixture.seven_day.resets_at },
@@ -267,9 +277,7 @@ describe('Claude quota usage reads', () => {
           : result(503, null);
       const data = await CLAUDE_CONFIG.fetchQuota(file, translations.t);
       expect(data.windows).toHaveLength(1);
-      expect(data.windows[0].id).toBe(
-        'remaining_dollars' in window ? 'cloud-session-credits' : 'seven-day-fable'
-      );
+      expect(data.windows[0]).toMatchObject({ id: 'cloud-session-credits', periodHours: null });
       expect(data.dollarWindows).toEqual([]);
     }
   });
@@ -451,8 +459,9 @@ describe('Claude usage snapshot rendering and retention', () => {
       '<div class="quotaRowHeader"><span class="quotaModel">Extra Usage</span><div class="quotaMeta"><span class="quotaPercent">Enabled</span><span class="quotaResetRelative">25% used</span>'
     );
     expect(markup).toContain(
-      '<span class="quotaModel" title="iguana_necktie">iguana_necktie</span><div class="quotaMeta"><span class="quotaPercent">$94.96 remaining</span>'
+      '<span class="quotaModel" title="iguana_necktie">Cloud session credits</span><div class="quotaMeta"><span class="quotaPercent">$94.96 remaining</span>'
     );
+    expect(markup).toContain('<div class="quotaMeta"><span class="quotaReset">Expires</span>');
     expect(markup).toContain('<div class="quotaMeta"><span class="quotaReset">Resets</span>');
     expect(markup).not.toMatch(/<div class="quotaRow"><span class="quotaReset">/);
     expect(markup).not.toContain('codexResetCreditLabel');
@@ -562,5 +571,78 @@ describe('Claude usage snapshot rendering and retention', () => {
       commitIfQuotaCacheCurrent(previousSession, () => store.setClaudeQuota({ [file.name]: quota }))
     ).toBe(false);
     expect(useQuotaStore.getState().claudeQuota).toEqual({});
+  });
+});
+
+describe('Claude cloud-session credit', () => {
+  // Shape of a live /api/oauth/usage response (values only; no account data).
+  const live = {
+    five_hour: { utilization: 3, resets_at: '2026-10-31T17:00:00+00:00' },
+    seven_day: { utilization: 41, resets_at: '2026-11-07T14:00:00+00:00' },
+    iguana_necktie: {
+      utilization: 100.0,
+      resets_at: '2026-11-05T07:59:00+00:00',
+      limit_dollars: 250,
+      used_dollars: 250.092662,
+      remaining_dollars: 0.0,
+    },
+    limits: [
+      {
+        kind: 'weekly_scoped',
+        group: 'weekly',
+        percent: 6,
+        resets_at: '2026-11-07T14:00:00Z',
+        scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+        is_active: false,
+      },
+    ],
+  };
+  const originalRequest = apiCallApi.request;
+  afterEach(() => {
+    apiCallApi.request = originalRequest;
+  });
+
+  test('renders iguana_necktie as a dollar credit with its expiry, not a 7-day meter', async () => {
+    apiCallApi.request = async (request) =>
+      request.url === CLAUDE_USAGE_URL ? result(200, live) : result(200, null);
+    const state = CLAUDE_CONFIG.buildSuccessState(
+      await CLAUDE_CONFIG.fetchQuota(file, translations.t)
+    );
+    // The Fable weekly limit comes from limits[]; the credit is no window at all.
+    expect(state.windows.map((window) => [window.id, window.usedPercent])).toEqual([
+      ['five-hour', 3],
+      ['seven-day', 41],
+      ['seven-day-fable', 6],
+    ]);
+    expect(state.dollarWindows).toEqual([
+      {
+        key: 'iguana_necktie',
+        limitDollars: 250,
+        usedDollars: 250.092662,
+        remainingDollars: 0,
+        utilization: 100,
+        resetsAt: '2026-11-05T07:59:00+00:00',
+      },
+    ]);
+
+    const markup = render(state);
+    expect(markup).toContain(
+      '<span class="quotaModel" title="iguana_necktie">Cloud session credits</span><div class="quotaMeta"><span class="quotaPercent">$0.00 remaining</span>'
+    );
+    expect(markup).toContain('Spent $250.09 / Limit $250.00');
+    expect(markup).toContain('<span class="quotaReset">Expires</span>');
+    expect(markup).toContain(formatQuotaResetTime(live.iguana_necktie.resets_at));
+    expect(markup).not.toContain('>iguana_necktie<');
+    // Exactly one Fable row: the weekly_scoped limit.
+    expect(markup.split('7-day Fable 5')).toHaveLength(2);
+  });
+
+  test('credit labels are translated in all six locales', async () => {
+    for (const locale of ['en', 'zh-CN', 'zh-TW', 'ru', 'vi', 'ko']) {
+      const messages = await Bun.file(`src/i18n/locales/${locale}.json`).json();
+      expect(typeof messages.claude_quota.cloud_session_credits).toBe('string');
+      expect(typeof messages.claude_quota.credit_expires).toBe('string');
+      expect(messages.claude_quota.credit_expires).not.toBe(messages.claude_quota.balance_reset);
+    }
   });
 });

@@ -48,16 +48,33 @@ describe('collectQuotaRowInstants', () => {
     const quota = {
       ...claudeQuota,
       dollarWindows: [
-        { key: 'iguana_necktie', resetsAt: iso(NOW + DAY_MS) },
+        { key: 'additional_credit_balance', resetsAt: iso(NOW + DAY_MS) },
         { key: 'arbitrary_future_balance', resetsAt: iso(NOW + 2 * DAY_MS) },
       ],
     };
     expect(collectQuotaRowInstants('claude', quota)).toEqual([
       { rowId: 'five_hour', atMs: NOW + 3 * HOUR_MS, kind: 'window' },
       { rowId: 'seven_day', atMs: NOW + 4 * DAY_MS, kind: 'window' },
-      { rowId: 'iguana_necktie', atMs: NOW + DAY_MS, kind: 'window' },
+      { rowId: 'additional_credit_balance', atMs: NOW + DAY_MS, kind: 'window' },
       { rowId: 'arbitrary_future_balance', atMs: NOW + 2 * DAY_MS, kind: 'window' },
     ]);
+  });
+
+  test('never treats the cloud-session credit expiry as a recovery', () => {
+    const quota = {
+      ...claudeQuota,
+      windows: [
+        ...claudeQuota.windows,
+        { id: 'cloud-session-credits', resetAtMs: NOW + HOUR_MS / 2 },
+      ],
+      dollarWindows: [{ key: 'iguana_necktie', resetsAt: iso(NOW + HOUR_MS / 2) }],
+    };
+    expect(collectQuotaRowInstants('claude', quota)).toEqual([
+      { rowId: 'five_hour', atMs: NOW + 3 * HOUR_MS, kind: 'window' },
+      { rowId: 'seven_day', atMs: NOW + 4 * DAY_MS, kind: 'window' },
+    ]);
+    expect(nextRecoveryMs('claude', quota, NOW)).toBe(NOW + 3 * HOUR_MS);
+    expect(pickUrgentRowId(collectQuotaRowInstants('claude', quota), NOW)).toBeNull();
   });
 
   test('drops Claude dollar balances with missing, null, or invalid resets', () => {

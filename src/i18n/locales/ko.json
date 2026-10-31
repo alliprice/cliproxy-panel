@@ -517,6 +517,7 @@
     "dollar_balance_remaining": "{{amount}} 남음",
     "balance_reset": "초기화",
     "balance_reset_unknown": "제공되지 않음",
+    "credit_expires": "만료",
     "stale_snapshot": "새로 고침에 실패했습니다. 마지막 성공 확인: {{time}}",
     "usage_scope_missing": "실시간 사용량을 읽을 수 없음: 이 setup 토큰에는 user:profile 범위가 없습니다",
     "plan_label": "플랜",

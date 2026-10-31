@@ -39,7 +39,7 @@ describe('Claude Fable quota', () => {
     ]);
   });
 
-  test('shows a dollar-denominated legacy field as cloud session credits, not Fable', () => {
+  test('shows the dollar-denominated iguana_necktie as cloud session credits, not Fable', () => {
     const reset = '2026-11-05T07:59:00+00:00';
     const windows = buildClaudeQuotaWindows(
       {
@@ -99,7 +99,7 @@ describe('Claude Fable quota', () => {
     ]);
   });
 
-  test('treats a legacy field with only remaining_dollars as cloud session credits', () => {
+  test('treats iguana_necktie with only remaining_dollars as cloud session credits', () => {
     const windows = buildClaudeQuotaWindows(
       {
         iguana_necktie: {
@@ -126,7 +126,7 @@ describe('Claude Fable quota', () => {
     ]);
   });
 
-  test('falls back to the legacy Fable field', () => {
+  test('never labels iguana_necktie as Fable, even without dollar amounts', () => {
     const windows = buildClaudeQuotaWindows(
       {
         iguana_necktie: {
@@ -139,18 +139,18 @@ describe('Claude Fable quota', () => {
 
     expect(windows).toEqual([
       {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
+        id: 'cloud-session-credits',
+        label: 'claude_quota.cloud_session_credits',
+        labelKey: 'claude_quota.cloud_session_credits',
         usedPercent: 41,
         resetLabel: formatQuotaResetTime(legacyReset),
         resetAtMs: Date.parse(legacyReset),
-        periodHours: 24 * 7,
+        periodHours: null,
       },
     ]);
   });
 
-  test('falls back to the legacy field when the modern percent is invalid', () => {
+  test('drops an invalid Fable limit instead of substituting iguana_necktie', () => {
     const windows = buildClaudeQuotaWindows(
       {
         iguana_necktie: {
@@ -170,20 +170,10 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toEqual([
-      {
-        id: 'seven-day-fable',
-        label: 'claude_quota.seven_day_fable',
-        labelKey: 'claude_quota.seven_day_fable',
-        usedPercent: 41,
-        resetLabel: formatQuotaResetTime(legacyReset),
-        resetAtMs: Date.parse(legacyReset),
-        periodHours: 24 * 7,
-      },
-    ]);
+    expect(windows.map((window) => window.id)).toEqual(['cloud-session-credits']);
   });
 
-  test('prefers the active modern field without rendering a duplicate', () => {
+  test('prefers the active modern Fable limit and keeps the credit separate', () => {
     const windows = buildClaudeQuotaWindows(
       {
         iguana_necktie: {
@@ -210,12 +200,11 @@ describe('Claude Fable quota', () => {
       t
     );
 
-    expect(windows).toHaveLength(1);
-    expect(windows[0]).toMatchObject({
-      id: 'seven-day-fable',
-      usedPercent: 64,
-      resetLabel: formatQuotaResetTime(modernReset),
-    });
+    expect(windows.map((window) => [window.id, window.usedPercent])).toEqual([
+      ['cloud-session-credits', 41],
+      ['seven-day-fable', 64],
+    ]);
+    expect(windows[1].resetLabel).toBe(formatQuotaResetTime(modernReset));
   });
 
   test('uses a valid modern candidate when the preferred candidate is invalid', () => {

@@ -120,8 +120,16 @@ export const CLAUDE_USAGE_WINDOW_KEYS = [
   { key: 'seven_day_opus', id: 'seven-day-opus', labelKey: 'claude_quota.seven_day_opus' },
   { key: 'seven_day_sonnet', id: 'seven-day-sonnet', labelKey: 'claude_quota.seven_day_sonnet' },
   { key: 'seven_day_cowork', id: 'seven-day-cowork', labelKey: 'claude_quota.seven_day_cowork' },
-  { key: 'iguana_necktie', id: 'seven-day-fable', labelKey: 'claude_quota.seven_day_fable' },
 ] as const;
+
+/**
+ * Usage key of the promotional Claude Code cloud-session credit (claude.ai
+ * "Cloud session credits"): a dollar pool with `limit_dollars`, `used_dollars`
+ * and `remaining_dollars`, whose `resets_at` is when the credit expires. It is
+ * not a usage window; the Fable weekly limit is a `weekly_scoped` entry in
+ * `limits[]`.
+ */
+export const CLAUDE_CLOUD_SESSION_CREDIT_KEY = 'iguana_necktie';
 
 // Codex API configuration
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';

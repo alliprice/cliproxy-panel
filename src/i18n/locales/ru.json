@@ -507,6 +507,7 @@
     "dollar_balance_remaining": "Осталось {{amount}}",
     "balance_reset": "Сброс",
     "balance_reset_unknown": "Не указан",
+    "credit_expires": "Истекает",
     "stale_snapshot": "Не удалось обновить. Последняя успешная проверка: {{time}}",
     "usage_scope_missing": "Текущее использование недоступно: у setup-токена нет области user:profile",
     "plan_label": "План",

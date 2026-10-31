@@ -517,6 +517,7 @@
     "dollar_balance_remaining": "Còn lại {{amount}}",
     "balance_reset": "Đặt lại",
     "balance_reset_unknown": "Không được cung cấp",
+    "credit_expires": "Hết hạn",
     "stale_snapshot": "Làm mới thất bại. Hiển thị lần kiểm tra thành công gần nhất: {{time}}",
     "usage_scope_missing": "Không đọc được mức sử dụng trực tiếp: setup token thiếu phạm vi user:profile",
     "plan_label": "Gói",

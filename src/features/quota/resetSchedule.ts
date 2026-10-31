@@ -18,7 +18,7 @@
  * tests fighting each other.
  */
 
-import { parseIsoToMs } from '@/utils/quota';
+import { CLAUDE_CLOUD_SESSION_CREDIT_KEY, parseIsoToMs } from '@/utils/quota';
 import { HOUR_MS } from '@/utils/time/durations';
 import type { QuotaProviderType } from './providers/types';
 
@@ -99,14 +99,19 @@ export function collectQuotaRowInstants(
     const windows = collectRows((quota as { windows?: WindowLike[] }).windows ?? [], 'window');
     if (provider === 'claude') {
       // Dollar balances render separately from plan meters, but their resets
-      // still return capacity and must participate in recovery sorting.
+      // still return capacity and must participate in recovery sorting. The
+      // cloud-session credit expires instead, which returns nothing.
       const balances = ((quota as { dollarWindows?: DollarWindowLike[] }).dollarWindows ?? [])
+        .filter((balance) => balance.key !== CLAUDE_CLOUD_SESSION_CREDIT_KEY)
         .map((balance): QuotaRowInstant | null => {
           const atMs = parseIsoToMs(balance.resetsAt);
           return atMs === null ? null : { rowId: balance.key, atMs, kind: 'window' };
         })
         .filter((instant): instant is QuotaRowInstant => instant !== null);
-      return [...windows, ...balances];
+      return [
+        ...windows.filter((instant) => instant.rowId !== 'cloud-session-credits'),
+        ...balances,
+      ];
     }
     if (provider !== 'codex') return windows;
 

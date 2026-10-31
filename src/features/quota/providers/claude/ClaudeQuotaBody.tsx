@@ -6,7 +6,12 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { meterPercentLabel, useMeterDisplay } from '../../meterDisplay';
 import type { ClaudeQuotaState } from '@/types';
-import { buildResetDisplay, formatQuotaResetTime, resolveResetMs } from '@/utils/quota';
+import {
+  CLAUDE_CLOUD_SESSION_CREDIT_KEY,
+  buildResetDisplay,
+  formatQuotaResetTime,
+  resolveResetMs,
+} from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
 import { QuotaMeter } from '../../components/QuotaMeter';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
@@ -118,6 +123,8 @@ export function ClaudeQuotaBody({
         </div>
       )}
       {(quota.dollarWindows ?? []).map((balance) => {
+        // The cloud-session credit's `resets_at` is when it expires.
+        const isCredit = balance.key === CLAUDE_CLOUD_SESSION_CREDIT_KEY;
         const resetDisplay = buildResetDisplay(
           formatQuotaResetTime(balance.resetsAt ?? undefined),
           resolveResetMs([balance.resetsAt]),
@@ -128,7 +135,7 @@ export function ClaudeQuotaBody({
           <div key={balance.key} className={classes.quotaRow}>
             <div className={classes.quotaRowHeader}>
               <span className={classes.quotaModel} title={balance.key}>
-                {balance.key}
+                {isCredit ? t('claude_quota.cloud_session_credits') : balance.key}
               </span>
               <div className={classes.quotaMeta}>
                 <span className={classes.quotaPercent}>
@@ -145,7 +152,9 @@ export function ClaudeQuotaBody({
               })}
             </div>
             <div className={classes.quotaMeta}>
-              <span className={classes.quotaReset}>{t('claude_quota.balance_reset')}</span>
+              <span className={classes.quotaReset}>
+                {t(isCredit ? 'claude_quota.credit_expires' : 'claude_quota.balance_reset')}
+              </span>
               {resetDisplay ? (
                 <QuotaResetLabel display={resetDisplay} classes={classes} />
               ) : (

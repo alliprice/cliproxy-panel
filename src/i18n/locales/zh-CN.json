@@ -502,6 +502,7 @@
     "dollar_balance_remaining": "剩余 {{amount}}",
     "balance_reset": "重置时间",
     "balance_reset_unknown": "未提供",
+    "credit_expires": "到期时间",
     "stale_snapshot": "刷新失败。显示上次成功检查的结果：{{time}}",
     "usage_scope_missing": "无法读取实时用量：此 setup token 缺少 user:profile 权限范围",
     "plan_label": "套餐",
