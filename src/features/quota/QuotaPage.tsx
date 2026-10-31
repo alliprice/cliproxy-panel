@@ -53,6 +53,7 @@ import { nextRecoveryMs } from './resetSchedule';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from './providers';
 import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
+import { requestResetGrantReads } from './providers/claude/resetGrantCache';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
 import { stripCredentialExtension } from './display';
@@ -455,6 +456,17 @@ export function QuotaPage() {
     preferences.showEmails
   );
 
+  // An explicit refresh also re-reads Claude reset grants, after the quota read
+  // so the two calls on one token do not land together.
+  const refreshEntry = useCallback(
+    (entry: QuotaFileEntry) => {
+      void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type]).then(() => {
+        if (entry.type === 'claude') requestResetGrantReads(connection, [entry.file]);
+      });
+    },
+    [connection, refreshQuota]
+  );
+
   const pendingRefreshRef = useRef<number | null>(null);
   const prevLoadingRef = useRef(loading);
 
@@ -487,9 +499,23 @@ export function QuotaPage() {
         disableControls
       )
     ) {
-      void loadQuota(pageItems, { keepExisting: true });
+      void loadQuota(pageItems, { keepExisting: true }).then(() =>
+        requestResetGrantReads(
+          connection,
+          pageItems.filter((entry) => entry.type === 'claude').map((entry) => entry.file)
+        )
+      );
     }
-  }, [disableControls, error, filesGeneration, loading, loadQuota, pageItems, sessionGeneration]);
+  }, [
+    connection,
+    disableControls,
+    error,
+    filesGeneration,
+    loading,
+    loadQuota,
+    pageItems,
+    sessionGeneration,
+  ]);
 
   // Page entry: once per session, refresh in the background whatever on this
   // page is missing or older than QUOTA_STALE_MS. Cached rows stay on screen
@@ -735,7 +761,7 @@ export function QuotaPage() {
                 nowMs={clockNow}
                 canUseActions={canUseActions}
                 resettingQuotaName={resettingQuotaName}
-                onRefresh={(entry) => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+                onRefresh={refreshEntry}
                 onReset={(entry) => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
               />
             ) : (
@@ -752,7 +778,7 @@ export function QuotaPage() {
                     lookbackMs={preferences.forecastLookbackHours * HOUR_MS}
                     nowMs={clockNow}
                     entranceDelayMs={cardEntranceDelay(index)}
-                    onRefresh={() => void refreshQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
+                    onRefresh={() => refreshEntry(entry)}
                     onReset={() => resetQuota(entry.file, QUOTA_ADAPTERS[entry.type])}
                   />
                 ))}

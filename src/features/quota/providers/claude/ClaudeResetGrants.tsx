@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNow } from '@/hooks/useNow';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -19,18 +19,24 @@ import {
 import { plainIdentity, usePrivacyRevealed } from '../../privacy';
 import { selectResetGrant } from './selectResetGrant';
 import { readResetGrantsForCard, scheduleResetGrantRead } from './resetGrantReads';
+import { resetGrantCache } from './resetGrantCache';
 
-/** Card-owned reads; the session-scoped journal owns spending and ambiguous retries. */
+/**
+ * Card-owned reads; the session-scoped journal owns spending and ambiguous retries.
+ * `weeklyResetAtMs` is the credential's 7-day reset (see claudeWeeklyResetAtMs):
+ * reads follow resetGrantCache, never the identity of the quota state.
+ */
 export function useClaudeResetGrants(
   file: AuthFileItem,
   enabled: boolean,
   disabled: boolean,
-  refreshToken: unknown,
+  weeklyResetAtMs: number | null,
   onRefresh: () => void
 ) {
   const { t } = useTranslation();
   const revealNames = usePrivacyRevealed();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const connection = useAuthStore((state) => state.apiBase);
   const [session] = useState(() => apiClient.getConnectionRevision());
   const sessionActive =
     connectionStatus === 'connected' && session === apiClient.getConnectionRevision();
@@ -39,28 +45,47 @@ export function useClaudeResetGrants(
   const now = useNow();
   const authIndex = normalizeAuthIndex(file.auth_index ?? file.authIndex);
   const key = JSON.stringify([file.name, authIndex]);
+  // Bumped by explicit refreshes; each card then re-plans against the cache.
+  const requests = useSyncExternalStore(
+    resetGrantCache.subscribe,
+    resetGrantCache.version,
+    resetGrantCache.version
+  );
   const [status, setStatus] = useState<AnthropicResetGrantStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [reload, setReload] = useState(0);
   const lock = useRef(false);
   const generation = useRef(0);
   useEffect(() => {
     const version = ++generation.current;
-    setStatus(null);
+    setStatus(authIndex ? resetGrantCache.peek(connection, authIndex) : null);
     if (!enabled || disabled || !sessionActive || !authIndex) return;
     let cancelled = false;
+    let cancelRead = () => {};
     const current = () =>
       !cancelled && version === generation.current && session === apiClient.getConnectionRevision();
-    const cancelRead = scheduleResetGrantRead(() => {
-      void readResetGrantsForCard(authIndex).then(
+    // Whether an upstream read is due now; when not, the cached grants are shown.
+    const due = async () => {
+      const plan = await resetGrantCache.plan(connection, authIndex, weeklyResetAtMs);
+      if (!current()) return false;
+      if (plan.status) setStatus(plan.status);
+      if (!plan.read) {
+        if (plan.status) setMessage('');
+        return false;
+      }
+      return true;
+    };
+    const read = () =>
+      readResetGrantsForCard(authIndex).then(
         (result) => {
+          resetGrantCache.store(connection, authIndex, weeklyResetAtMs, result);
           if (current()) {
             setStatus(result);
             setMessage('');
           }
         },
         (error: unknown) => {
+          resetGrantCache.fail(connection, authIndex);
           if (current()) {
             setMessage(
               error instanceof AnthropicResetGrantError && error.code === 'rate_limited'
@@ -70,13 +95,31 @@ export function useClaudeResetGrants(
           }
         }
       );
-    }, current);
+    void due().then((first) => {
+      if (!first || !current()) return;
+      // Planned again after the delay: another activation's read may have landed meanwhile.
+      cancelRead = scheduleResetGrantRead(() => {
+        void due().then((still) => {
+          if (still) void read();
+        });
+      }, current);
+    });
     return () => {
       cancelled = true;
       cancelRead();
       generation.current += 1;
     };
-  }, [authIndex, key, enabled, disabled, sessionActive, session, refreshToken, reload]);
+  }, [
+    authIndex,
+    connection,
+    key,
+    enabled,
+    disabled,
+    sessionActive,
+    session,
+    weeklyResetAtMs,
+    requests,
+  ]);
 
   const operation = resetGrantOperations.inspect(key);
   const pending = operation && !operation.code ? operation : undefined;
@@ -128,7 +171,8 @@ export function useClaudeResetGrants(
           // A concurrent page-wide refresh can invalidate this read generation.
           // Release the local lock regardless, but never refresh a replacement account.
           setBusy(false);
-          setReload((value) => value + 1);
+          // Spending changes the grants: the next read goes upstream.
+          resetGrantCache.request(connection, [authIndex]);
           if (current()) onRefresh();
         }
       },

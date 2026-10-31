@@ -14,6 +14,7 @@ import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import type { QuotaFileEntry } from '../logic';
 import type { QuotaProviderType } from '../providers/types';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
+import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
 import {
   exhaustedUntilMs,
   meterAsOf,
@@ -182,7 +183,7 @@ function LedgerRow(props: LedgerRowProps) {
     entry.file,
     entry.type === 'claude' && status !== 'idle',
     !canRefresh || status === 'loading' || resetting,
-    quota,
+    claudeWeeklyResetAtMs(quota),
     onRefresh
   );
 

@@ -20,6 +20,7 @@ import { QUOTA_ADAPTERS, type QuotaCardState } from '../providers';
 import type { QuotaFileEntry } from '../logic';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
 import { ClaudeResetGrantDetails } from '../providers/claude/ClaudeResetGrantDetails';
+import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
 import { hasClaudeUsageData } from '../providers/claude/data';
 import { stripCredentialExtension } from '../display';
 import { MeterDisplayContext, useMeterDisplay } from '../meterDisplay';
@@ -86,7 +87,7 @@ export function QuotaCard(props: QuotaCardProps) {
     file,
     entry.type === 'claude' && status !== 'idle',
     !canRefresh || loading || resetting,
-    quota,
+    claudeWeeklyResetAtMs(quota),
     onRefresh
   );
   const providerType =
