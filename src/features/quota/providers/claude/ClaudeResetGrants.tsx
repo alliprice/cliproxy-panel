@@ -8,6 +8,7 @@ import {
   AnthropicResetGrantError,
   type AnthropicResetGrantStatus,
 } from '@/services/api/claudeResetGrants';
+import { upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import type { AuthFileItem } from '@/types';
 import { normalizeAuthIndex } from '@/utils/quota';
 import {
@@ -20,6 +21,7 @@ import { plainIdentity, usePrivacyRevealed } from '../../privacy';
 import { selectResetGrant } from './selectResetGrant';
 import { readResetGrantsForCard, scheduleResetGrantRead } from './resetGrantReads';
 import { resetGrantCache } from './resetGrantCache';
+import { claudeUsageScope, isClaudeSetupToken } from './usageScope';
 
 /**
  * Card-owned reads; the session-scoped journal owns spending and ambiguous retries.
@@ -45,6 +47,8 @@ export function useClaudeResetGrants(
   const now = useNow();
   const authIndex = normalizeAuthIndex(file.auth_index ?? file.authIndex);
   const key = JSON.stringify([file.name, authIndex]);
+  const setupToken = isClaudeSetupToken(file);
+  const fileModified = typeof file.modified === 'number' ? file.modified : undefined;
   // Bumped by explicit refreshes; each card then re-plans against the cache.
   const requests = useSyncExternalStore(
     resetGrantCache.subscribe,
@@ -66,6 +70,8 @@ export function useClaudeResetGrants(
       !cancelled && version === generation.current && session === apiClient.getConnectionRevision();
     // Whether an upstream read is due now; when not, the cached grants are shown.
     const due = async () => {
+      // A setup token cannot read grants; the card says why.
+      if (setupToken || claudeUsageScope.refused(authIndex, fileModified)) return false;
       const plan = await resetGrantCache.plan(connection, authIndex, weeklyResetAtMs);
       if (!current()) return false;
       if (plan.status) setStatus(plan.status);
@@ -73,7 +79,8 @@ export function useClaudeResetGrants(
         if (plan.status) setMessage('');
         return false;
       }
-      return true;
+      // Inside a Retry-After window the card shows when reads resume.
+      return upstreamRateLimits.blockedUntil(authIndex) === null;
     };
     const read = () =>
       readResetGrantsForCard(authIndex).then(
@@ -86,12 +93,12 @@ export function useClaudeResetGrants(
         },
         (error: unknown) => {
           resetGrantCache.fail(connection, authIndex);
+          const code = error instanceof AnthropicResetGrantError ? error.code : null;
+          if (code === 'scope') claudeUsageScope.record(authIndex, fileModified);
           if (current()) {
-            setMessage(
-              error instanceof AnthropicResetGrantError && error.code === 'rate_limited'
-                ? 'rate_limited'
-                : 'read_error'
-            );
+            // A 429 starts a Retry-After block and a scope refusal marks the
+            // credential; the card reports both.
+            setMessage(code === 'rate_limited' || code === 'scope' ? '' : 'read_error');
           }
         }
       );
@@ -117,6 +124,8 @@ export function useClaudeResetGrants(
     disabled,
     sessionActive,
     session,
+    setupToken,
+    fileModified,
     weeklyResetAtMs,
     requests,
   ]);

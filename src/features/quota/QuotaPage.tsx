@@ -54,6 +54,7 @@ import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from './providers
 import type { QuotaProviderType } from './providers/types';
 import { useDevinQuotaAutoLoad } from './providers/devin/useDevinQuotaAutoLoad';
 import { requestResetGrantReads } from './providers/claude/resetGrantCache';
+import { quotaReadBlocked } from './rateLimit';
 import { useQuotaActions } from './hooks/useQuotaActions';
 import { useQuotaBatchLoader } from './hooks/useQuotaBatchLoader';
 import { stripCredentialExtension } from './display';
@@ -520,7 +521,8 @@ export function QuotaPage() {
   // Page entry: once per session, refresh in the background whatever on this
   // page is missing or older than QUOTA_STALE_MS. Cached rows stay on screen
   // and update in place. Retried if another batch (Devin auto-load) holds the
-  // loader.
+  // loader. Credentials inside an upstream Retry-After window, and Claude setup
+  // tokens that cannot read usage, are left alone.
   const autoRefreshedRef = useRef<number | null>(null);
   useEffect(() => {
     if (!hydrated || loading || batchLoading || Boolean(error) || disableControls) return;
@@ -532,6 +534,7 @@ export function QuotaPage() {
     const stale = pageItems.filter((entry) => {
       const quota = getQuota(entry);
       if (quota?.status === 'loading') return false;
+      if (quotaReadBlocked(entry.type, entry.file)) return false;
       const observedAt = quotaObservedAt(quota);
       return observedAt === null || now - observedAt > QUOTA_STALE_MS;
     });

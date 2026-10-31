@@ -63,3 +63,23 @@ export const normalizeClaudeUsageSnapshot = (value: unknown): ClaudeUsageSnapsho
     dollarWindows,
   };
 };
+
+/**
+ * Whether Anthropic refused a usage or profile read because the OAuth token
+ * lacks the `user:profile` scope, as a setup token (`claude setup-token`) does:
+ * 403 `permission_error`, `details.error_code: oauth_scope_insufficient`,
+ * "OAuth token does not meet scope requirement user:profile".
+ */
+export const isClaudeOAuthScopeError = (result: {
+  statusCode: number;
+  body: unknown;
+  bodyText?: string;
+}): boolean => {
+  if (result.statusCode !== 403) return false;
+  const error = isRecord(result.body) && isRecord(result.body.error) ? result.body.error : null;
+  const details = error && isRecord(error.details) ? error.details : null;
+  if (details?.error_code === 'oauth_scope_insufficient') return true;
+  if (error?.error_code === 'oauth_scope_insufficient') return true;
+  const message = typeof error?.message === 'string' ? error.message : (result.bodyText ?? '');
+  return /scope requirement/i.test(message);
+};

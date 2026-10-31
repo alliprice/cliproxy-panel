@@ -11,6 +11,10 @@
  * credentials that already show data keep it while the read runs, and keep it
  * if the read fails, so cached rows never flash back to loading. Returns
  * whether the batch started (false when another batch is in flight).
+ *
+ * Credentials inside an upstream Retry-After window, and Claude setup tokens
+ * that cannot read usage, are skipped: no request, and their cards keep what
+ * they show.
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -22,6 +26,7 @@ import type { QuotaFileEntry } from '../logic';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from '../providers';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
 import type { QuotaProviderType } from '../providers/types';
+import { quotaReadBlocked } from '../rateLimit';
 
 interface BatchFetchResult {
   name: string;
@@ -40,10 +45,11 @@ export function useQuotaBatchLoader() {
 
   const loadQuota = useCallback(
     async (
-      targets: QuotaFileEntry[],
+      requested: QuotaFileEntry[],
       options: { keepExisting?: boolean } = {}
     ): Promise<boolean> => {
       if (loadingRef.current) return false;
+      const targets = requested.filter((entry) => !quotaReadBlocked(entry.type, entry.file));
       if (targets.length === 0) return false;
       const keepExisting = options.keepExisting === true;
       loadingRef.current = true;

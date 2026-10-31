@@ -17,6 +17,11 @@ import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { plainIdentity } from '../privacy';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
 import { getQuotaMap, getQuotaSetter, type QuotaAdapter, type QuotaCardState } from '../providers';
+import { formatRateLimitedUntil, quotaRateLimitedUntil } from '../rateLimit';
+import {
+  claudeUsageUnavailable,
+  forgetClaudeUsageScopeRefusal,
+} from '../providers/claude/usageScope';
 
 const getQuotaState = (adapter: QuotaAdapter, file: AuthFileItem): QuotaCardState | undefined =>
   getQuotaMap(adapter)[getQuotaCacheKey(file)];
@@ -37,6 +42,21 @@ export function useQuotaActions(disableControls: boolean, revealNames = true) {
       const cacheKey = getQuotaCacheKey(file);
       if (resettingQuotaName === cacheKey) return;
       if (getQuotaState(adapter, file)?.status === 'loading') return;
+      if (adapter.type === 'claude') {
+        // An explicit refresh asks again after a scope refusal, but not for a
+        // credential the listing declares a setup token.
+        forgetClaudeUsageScopeRefusal(file);
+        if (claudeUsageUnavailable(file)) {
+          showNotification(t('claude_quota.usage_scope_missing'), 'info');
+          return;
+        }
+      }
+      // Inside an upstream Retry-After window a read only extends the lockout.
+      const limitedUntil = quotaRateLimitedUntil(adapter.type, file);
+      if (limitedUntil !== null) {
+        showNotification(formatRateLimitedUntil(t, limitedUntil), 'warning');
+        return;
+      }
       const cacheGeneration = captureQuotaCacheGeneration(file.name);
       const setQuota = getQuotaSetter(adapter);
 

@@ -13,6 +13,7 @@ import {
   type AnthropicResetSettledCode,
 } from '../src/services/api/claudeResetGrants';
 import { apiCallApi, type ApiCallRequest } from '../src/services/api/apiCall';
+import { upstreamRateLimits } from '../src/services/api/upstreamRateLimit';
 import {
   createResetGrantOperations,
   ResetGrantPreflightError,
@@ -27,6 +28,8 @@ const status = () => parseAnthropicResetGrantStatus(block)!;
 const originalRequest = apiCallApi.request;
 afterEach(() => {
   apiCallApi.request = originalRequest;
+  // A 429 starts a Retry-After block that would refuse the next call.
+  upstreamRateLimits.clear();
 });
 
 describe('Claude reset grant fail-closed parsing', () => {
@@ -122,6 +125,7 @@ test('claim terminal mappings and ambiguous outcomes', async () => {
   ] as const) {
     apiCallApi.request = async () => ({ statusCode, body: null, bodyText: '', header: {} });
     expect(await claimClaudeResetGrant('a', organization, grant.id, 'r')).toBe(code);
+    upstreamRateLimits.clear();
   }
   for (const statusCode of [200, 400, 500]) {
     apiCallApi.request = async () => ({
@@ -446,6 +450,7 @@ test('account reads map upstream 429 to a sanitized typed rate-limit failure', a
     return { statusCode: 429, body: 'private upstream detail', bodyText: '', header: {} };
   };
   for (const read of [readClaudeResetGrants, readClaudeOrganization]) {
+    upstreamRateLimits.clear(); // Each read meets the 429 itself, not the block it starts.
     await expect(read('index')).rejects.toMatchObject({
       name: 'AnthropicResetGrantError',
       code: 'rate_limited',

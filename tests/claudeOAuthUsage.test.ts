@@ -7,6 +7,7 @@ import i18n from '@/i18n';
 import { normalizeClaudeUsageSnapshot } from '@/services/api/claudeUsage';
 import { apiCallApi, getApiCallErrorMessage, type ApiCallResult } from '@/services/api/apiCall';
 import { apiClient } from '@/services/api/client';
+import { upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import { CLAUDE_CONFIG, hasClaudeUsageData } from '@/features/quota/providers/claude/data';
 import { ClaudeQuotaBody } from '@/features/quota/providers/claude/ClaudeQuotaBody';
 import { buildTimelineLane } from '@/features/quota/quotaTimelineModel';
@@ -182,6 +183,8 @@ describe('Claude quota usage reads', () => {
   const originalRequest = apiCallApi.request;
   afterEach(() => {
     apiCallApi.request = originalRequest;
+    // A 429 below starts a Retry-After block that would skip the next read.
+    upstreamRateLimits.clear();
   });
 
   test('uses existing quota reads and separates dollar balances from plan windows', async () => {
@@ -242,6 +245,7 @@ describe('Claude quota usage reads', () => {
       } catch (error) {
         expect(getStatusFromError(error)).toBe(status);
       }
+      upstreamRateLimits.clear();
     }
   });
 
@@ -333,6 +337,8 @@ describe('Claude quota usage reads', () => {
         expect(retained.extraUsage).toBe(good.extraUsage);
         expect(retained.dollarWindows).toBe(good.dollarWindows);
         failing = false;
+        // The upstream 429 holds further reads until its Retry-After window ends.
+        upstreamRateLimits.clear();
         const recovered = CLAUDE_CONFIG.buildSuccessState(
           await CLAUDE_CONFIG.fetchQuota(file, translations.t)
         );

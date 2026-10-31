@@ -22,6 +22,8 @@ import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
 import { ClaudeResetGrantDetails } from '../providers/claude/ClaudeResetGrantDetails';
 import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
 import { hasClaudeUsageData } from '../providers/claude/data';
+import { useClaudeUsageUnavailable, useQuotaRateLimitedUntil } from '../hooks/useQuotaReadBlocks';
+import { formatRateLimitedUntil } from '../rateLimit';
 import { stripCredentialExtension } from '../display';
 import { MeterDisplayContext, useMeterDisplay } from '../meterDisplay';
 import { runsOutAtPace, windowBurn } from '../forecast/burnRate';
@@ -66,10 +68,12 @@ export function QuotaCard(props: QuotaCardProps) {
     onRefresh,
     onReset,
   } = props;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { mode } = useMeterDisplay();
   const adapter = QUOTA_ADAPTERS[entry.type];
   const file = entry.file;
+  const rateLimitedUntil = useQuotaRateLimitedUntil(entry.type, file, nowMs);
+  const usageUnavailable = useClaudeUsageUnavailable(entry.type, file);
   const retainedClaudeUsage =
     entry.type === 'claude' && hasClaudeUsageData(quota as ClaudeQuotaState | undefined);
   const displayName = stripCredentialExtension(getQuotaDisplayName(file));
@@ -170,6 +174,17 @@ export function QuotaCard(props: QuotaCardProps) {
 
       <MeterDisplayContext.Provider value={meterDisplay}>
         <div className={styles.body}>
+          {usageUnavailable ? (
+            <div role="status" className={quotaClasses.quotaMessage}>
+              {t('claude_quota.usage_scope_missing')}
+            </div>
+          ) : (
+            rateLimitedUntil !== null && (
+              <div role="status" className={quotaClasses.codexResetCreditsError}>
+                {formatRateLimitedUntil(t, rateLimitedUntil, nowMs, i18n.language)}
+              </div>
+            )
+          )}
           {status === 'idle' ? (
             <button
               type="button"
@@ -191,9 +206,12 @@ export function QuotaCard(props: QuotaCardProps) {
               ))}
             </div>
           ) : status === 'error' ? (
-            <div className={styles.errorStrip} role="alert">
-              {t(`${adapter.i18nPrefix}.load_failed`, { message: errorMessage })}
-            </div>
+            // A setup token's refusal is explained above, not reported as a failure.
+            usageUnavailable ? null : (
+              <div className={styles.errorStrip} role="alert">
+                {t(`${adapter.i18nPrefix}.load_failed`, { message: errorMessage })}
+              </div>
+            )
           ) : quota && !retainedClaudeUsage ? (
             <adapter.Body
               quota={quota}

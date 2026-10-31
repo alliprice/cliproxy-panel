@@ -1,6 +1,7 @@
 // Upstream cedar_ember contract, following opencodex anthropic-reset-grants.
-import { apiCallApi } from './apiCall';
 import { CLAUDE_REQUEST_HEADERS } from '@/utils/quota/constants';
+import { isClaudeOAuthScopeError } from './claudeUsage';
+import { requestUpstream, UpstreamRateLimitedError } from './upstreamRateLimit';
 
 export const ANTHROPIC_API_ORIGIN = 'https://api.anthropic.com';
 export const ANTHROPIC_RESET_GRANT_PROGRAM = 'cedar_ember';
@@ -60,7 +61,9 @@ export interface AnthropicResetGrantStatus {
   cooldownUntil: string | null;
 }
 
-export type AnthropicResetGrantErrorCode = 'auth' | 'upstream' | 'malformed' | 'rate_limited';
+/** `scope`: the token lacks `user:profile` (a setup token) and can never read grants. */
+export type AnthropicResetGrantErrorCode =
+  'auth' | 'scope' | 'upstream' | 'malformed' | 'rate_limited';
 
 /** A read failure. `message` is fixed text; upstream detail is never attached. */
 export class AnthropicResetGrantError extends Error {
@@ -236,15 +239,24 @@ export function anthropicResetGrantBlocker(
 }
 
 async function readAccount(authIndex: string, path: string): Promise<Record<string, unknown>> {
-  const response = await apiCallApi.request(
-    {
-      authIndex,
-      method: 'GET',
-      url: ANTHROPIC_API_ORIGIN + path,
-      header: { ...CLAUDE_REQUEST_HEADERS },
-    },
-    { timeout: 12000 }
-  );
+  let response;
+  try {
+    response = await requestUpstream(
+      {
+        authIndex,
+        method: 'GET',
+        url: ANTHROPIC_API_ORIGIN + path,
+        header: { ...CLAUDE_REQUEST_HEADERS },
+      },
+      { timeout: 12000 }
+    );
+  } catch (error) {
+    // Still inside a Retry-After window: nothing was sent.
+    if (error instanceof UpstreamRateLimitedError)
+      throw new AnthropicResetGrantError('rate_limited');
+    throw error;
+  }
+  if (isClaudeOAuthScopeError(response)) throw new AnthropicResetGrantError('scope');
   if (response.statusCode === 401 || response.statusCode === 403)
     throw new AnthropicResetGrantError('auth');
   if (response.statusCode === 429) throw new AnthropicResetGrantError('rate_limited');
@@ -283,7 +295,7 @@ export async function claimClaudeResetGrant(
   )
     throw new AnthropicResetGrantError('malformed');
   try {
-    const response = await apiCallApi.request(
+    const response = await requestUpstream(
       {
         authIndex,
         method: 'POST',
@@ -308,7 +320,9 @@ export async function claimClaudeResetGrant(
     ) {
       return result as AnthropicResetUpstreamResult;
     }
-  } catch {
+  } catch (error) {
+    // Refused before sending, inside a Retry-After window: nothing was spent.
+    if (error instanceof UpstreamRateLimitedError) return 'rate_limited';
     /* The proxy may have sent the claim even if the management request failed. */
   }
   throw new AnthropicResetGrantUnknownOutcome();

@@ -15,6 +15,8 @@ import type { QuotaFileEntry } from '../logic';
 import type { QuotaProviderType } from '../providers/types';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
 import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
+import { useClaudeUsageUnavailable, useQuotaRateLimitedUntil } from '../hooks/useQuotaReadBlocks';
+import { formatRateLimitedUntil } from '../rateLimit';
 import {
   exhaustedUntilMs,
   meterAsOf,
@@ -186,6 +188,8 @@ function LedgerRow(props: LedgerRowProps) {
     claudeWeeklyResetAtMs(quota),
     onRefresh
   );
+  const rateLimitedUntil = useQuotaRateLimitedUntil(entry.type, entry.file, nowMs);
+  const usageUnavailable = useClaudeUsageUnavailable(entry.type, entry.file);
 
   const backAtMs = exhaustedUntilMs(meters, nowMs);
   const resetText = (meter: QuotaMeterReading) =>
@@ -209,7 +213,18 @@ function LedgerRow(props: LedgerRowProps) {
         </div>
         <div className={styles.metaLine}>
           <span>{getTypeLabel(t, entry.type)}</span>
-          {backAtMs !== null ? (
+          {usageUnavailable ? (
+            // Without readings the meters column carries the explanation instead.
+            meters.length > 0 && (
+              <span className={styles.alert} title={t('claude_quota.usage_scope_missing')}>
+                {t('claude_quota.usage_scope_missing')}
+              </span>
+            )
+          ) : rateLimitedUntil !== null ? (
+            <span className={styles.alert}>
+              {formatRateLimitedUntil(t, rateLimitedUntil, nowMs, i18n.language)}
+            </span>
+          ) : backAtMs !== null ? (
             <span className={styles.alert}>
               {t('quota_management.ledger_back_in', {
                 duration: formatCompactDuration(backAtMs - nowMs),
@@ -272,6 +287,8 @@ function LedgerRow(props: LedgerRowProps) {
               </div>
             );
           })
+        ) : usageUnavailable ? (
+          <p className={styles.muted}>{t('claude_quota.usage_scope_missing')}</p>
         ) : status === 'error' ? (
           <p className={styles.error} role="alert">
             {resolveQuotaErrorMessage(

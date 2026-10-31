@@ -14,8 +14,9 @@ import type {
   ClaudeUsageWindow,
   ClaudeUsagePayload,
 } from '@/types';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
-import { normalizeClaudeUsageSnapshot } from '@/services/api/claudeUsage';
+import { getApiCallErrorMessage } from '@/services/api';
+import { isClaudeOAuthScopeError, normalizeClaudeUsageSnapshot } from '@/services/api/claudeUsage';
+import { requestUpstream, upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import {
   CLAUDE_PROFILE_URL,
   CLAUDE_USAGE_URL,
@@ -32,7 +33,13 @@ import {
   isDisabledAuthFile,
 } from '@/utils/quota';
 import { normalizeAuthIndex } from '@/utils/authIndex';
+import { rateLimitedQuotaError } from '../../rateLimit';
 import type { QuotaProviderData } from '../types';
+import {
+  claudeUsageUnavailable,
+  forgetClaudeUsageScopeRefusal,
+  recordClaudeUsageScopeRefusal,
+} from './usageScope';
 
 export type ClaudeQuotaData = {
   windows: ClaudeQuotaWindow[];
@@ -188,15 +195,19 @@ const fetchClaudeQuota = async (file: AuthFileItem, t: TFunction): Promise<Claud
   if (!authIndex) {
     throw new Error(t('claude_quota.missing_auth_index'));
   }
+  // A setup token cannot read usage; asking again only returns the same 403.
+  if (claudeUsageUnavailable(file)) throw new Error(t('claude_quota.usage_scope_missing'));
+  const limitedUntil = upstreamRateLimits.blockedUntil(authIndex);
+  if (limitedUntil !== null) throw rateLimitedQuotaError(t, limitedUntil);
 
   const [usageResult, profileResult] = await Promise.allSettled([
-    apiCallApi.request({
+    requestUpstream({
       authIndex,
       method: 'GET',
       url: CLAUDE_USAGE_URL,
       header: { ...CLAUDE_REQUEST_HEADERS, Accept: 'application/json' },
     }),
-    apiCallApi.request({
+    requestUpstream({
       authIndex,
       method: 'GET',
       url: CLAUDE_PROFILE_URL,
@@ -210,9 +221,14 @@ const fetchClaudeQuota = async (file: AuthFileItem, t: TFunction): Promise<Claud
 
   const result = usageResult.value;
 
+  if (isClaudeOAuthScopeError(result)) {
+    recordClaudeUsageScopeRefusal(file);
+    throw new Error(t('claude_quota.usage_scope_missing'));
+  }
   if (result.statusCode < 200 || result.statusCode >= 300) {
     throw createStatusError(getApiCallErrorMessage(result), result.statusCode);
   }
+  forgetClaudeUsageScopeRefusal(file);
 
   const payload = parseClaudeUsagePayload(result.body ?? result.bodyText);
   if (!payload) {

@@ -16,6 +16,7 @@ import type {
 } from '@/types';
 import { apiCallApi, authFilesApi, getApiCallErrorMessage } from '@/services/api';
 import { guardConfigConnection } from '@/services/api/configValue';
+import { requestUpstream, upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import { isRecord } from '@/utils/helpers';
 import {
   CODEX_RATE_LIMIT_RESET_CREDITS_URL,
@@ -40,6 +41,7 @@ import {
   isDisabledAuthFile,
 } from '@/utils/quota';
 import { normalizeAuthIndex } from '@/utils/authIndex';
+import { rateLimitedQuotaError } from '../../rateLimit';
 import type { QuotaProviderData } from '../types';
 
 const CODEX_OPTIONAL_REQUEST_TIMEOUT_MS = 8000;
@@ -421,6 +423,9 @@ const fetchCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQ
   if (!authIndex) {
     throw new Error(t('codex_quota.missing_auth_index'));
   }
+  // Skips the subscription and reset-credit reads too: they share the account.
+  const limitedUntil = upstreamRateLimits.blockedUntil(authIndex);
+  if (limitedUntil !== null) throw rateLimitedQuotaError(t, limitedUntil);
 
   const planTypeFromFile = resolveCodexPlanType(file);
   const subscriptionActiveUntilFromFile = resolveCodexSubscriptionActiveUntil(file);
@@ -428,7 +433,7 @@ const fetchCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQ
   const requestHeader = buildCodexRequestHeader(file);
 
   const [result, liveSubscriptionActiveUntil] = await Promise.all([
-    apiCallApi.request({
+    requestUpstream({
       authIndex,
       method: 'GET',
       url: CODEX_USAGE_URL,
