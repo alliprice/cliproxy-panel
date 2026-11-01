@@ -29,6 +29,18 @@ export interface MockCredential {
    * after a server restart), so the panel's own cache is the only fallback.
    */
   passiveAgeMinutes?: number;
+  /**
+   * What CLIProxyAPI does with it, as the auth-files list reports: `serving`
+   * carries traffic; `cooling` is benched by a credential_quota cooldown that
+   * ends when its 5-hour window resets, with a frozen 97% reading. Omitted =
+   * standby (no recent requests).
+   */
+  routing?: 'serving' | 'cooling';
+  priority?: number;
+  /** A `claude setup-token` credential: usage reads answer 403 (no user:profile scope). */
+  setupToken?: boolean;
+  /** Usage reads answer 429 with this Retry-After, in seconds. */
+  usageRetryAfterSeconds?: number;
 }
 
 export const MOCK_CREDENTIALS: MockCredential[] = [
@@ -39,7 +51,10 @@ export const MOCK_CREDENTIALS: MockCredential[] = [
     authIndex: 'mock-1',
     resetOffsetHours: 68,
     drainPerHour: 1.5,
-    passiveAgeMinutes: 90,
+    passiveAgeMinutes: 55,
+    routing: 'cooling',
+    priority: 1,
+    setupToken: true,
   },
   {
     name: 'gmail',
@@ -48,7 +63,9 @@ export const MOCK_CREDENTIALS: MockCredential[] = [
     authIndex: 'mock-2',
     resetOffsetHours: 88,
     drainPerHour: 0.065,
-    passiveAgeMinutes: 2,
+    passiveAgeMinutes: 1,
+    routing: 'serving',
+    usageRetryAfterSeconds: 120,
   },
   {
     name: 'work',
@@ -94,6 +111,7 @@ export const MOCK_CREDENTIALS: MockCredential[] = [
     resetOffsetHours: 50,
     drainPerHour: 0.4,
     passiveAgeMinutes: 4,
+    routing: 'serving',
   },
   {
     name: 'codex alt',

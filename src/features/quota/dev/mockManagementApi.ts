@@ -68,9 +68,34 @@ const readBody = (req: MockRequest): Promise<Record<string, unknown>> =>
     });
   });
 
+/** A benched credential's cooldown ends 20s after its 5-hour window resets. */
+const coolingRetryAtMs = (credential: MockCredential, nowMs: number) =>
+  mockFiveHour(credential, nowMs).resetAtMs + 20_000;
+
 /** Passive snapshot in CPA's shape: canonical header names, observed_at RFC 3339. */
 const passiveQuota = (credential: MockCredential, nowMs: number) => {
   if (credential.passiveAgeMinutes === undefined) return { signals: {} };
+  if (credential.routing === 'cooling') {
+    // Rejected requests carry no quota headers: the reading froze at the last
+    // success, at the limit, inside the current 5-hour window.
+    const resetAtMs = mockFiveHour(credential, nowMs).resetAtMs;
+    const observedAtMs = Math.max(
+      nowMs - credential.passiveAgeMinutes * 60_000,
+      resetAtMs - 5 * 3_600_000 + 60_000
+    );
+    return {
+      observed_at: new Date(observedAtMs).toISOString(),
+      signals: {
+        'Anthropic-Ratelimit-Unified-5h-Utilization': '0.97',
+        'Anthropic-Ratelimit-Unified-5h-Reset': String(Math.round(resetAtMs / 1000)),
+        'Anthropic-Ratelimit-Unified-7d-Utilization': '0.41',
+        'Anthropic-Ratelimit-Unified-7d-Reset': String(
+          Math.round(mockWindowEnd(credential, observedAtMs, nowMs) / 1000)
+        ),
+        'Anthropic-Ratelimit-Unified-Status': 'allowed_warning',
+      },
+    };
+  }
   const observedAtMs = nowMs - credential.passiveAgeMinutes * 60_000;
   const weekly = mockWeeklyRemaining(credential, observedAtMs, nowMs);
   const weeklyResetSec = String(Math.round(mockWindowEnd(credential, observedAtMs, nowMs) / 1000));
@@ -99,18 +124,74 @@ const passiveQuota = (credential: MockCredential, nowMs: number) => {
   return { observed_at: new Date(observedAtMs).toISOString(), signals };
 };
 
-const credentialFile = (credential: MockCredential) => ({
-  name: credential.name,
-  type: PROVIDER_TYPES[credential.provider],
-  provider: PROVIDER_TYPES[credential.provider],
-  email: credential.email,
-  auth_index: credential.authIndex,
-  status: 'active',
-  disabled: false,
-  ...(credential.provider === 'claude' || credential.provider === 'codex'
-    ? { quota: passiveQuota(credential, Date.now()) }
-    : {}),
-});
+/** Ten-minute buckets, oldest first, as CPA lists them. */
+const recentRequests = (credential: MockCredential) => {
+  const tail =
+    credential.routing === 'serving'
+      ? [184, 125, 61, 78].map((success) => ({ success, failed: 0 }))
+      : credential.routing === 'cooling'
+        ? [
+            { success: 0, failed: 0 },
+            { success: 0, failed: 0 },
+            { success: 0, failed: 3 },
+            { success: 0, failed: 2 },
+          ]
+        : [];
+  return [...Array.from({ length: 20 - tail.length }, () => ({ success: 0, failed: 0 })), ...tail];
+};
+
+/** CPA's cooldown records for a benched credential: credential-wide, plus per model. */
+const cooldowns = (credential: MockCredential, nowMs: number) => {
+  if (credential.routing !== 'cooling') return [];
+  const retryAtMs = coolingRetryAtMs(credential, nowMs);
+  const timer = {
+    retry_at: new Date(retryAtMs).toISOString(),
+    remaining_seconds: Math.max(1, Math.ceil((retryAtMs - nowMs) / 1000)),
+  };
+  return [
+    { scope: 'credential', reason: 'credential_quota', ...timer },
+    {
+      scope: 'model',
+      model_key: 'claude-opus',
+      reason: 'credential_quota',
+      http_status: 429,
+      ...timer,
+    },
+    { scope: 'model', model_key: 'claude-sonnet', reason: 'quota', http_status: 429, ...timer },
+  ];
+};
+
+const credentialFile = (credential: MockCredential) => {
+  const nowMs = Date.now();
+  const cooling = credential.routing === 'cooling';
+  return {
+    name: credential.name,
+    type: PROVIDER_TYPES[credential.provider],
+    provider: PROVIDER_TYPES[credential.provider],
+    email: credential.email,
+    auth_index: credential.authIndex,
+    status: cooling ? 'error' : 'active',
+    unavailable: cooling,
+    ...(cooling
+      ? {
+          status_message: JSON.stringify({
+            type: 'error',
+            error: {
+              type: 'rate_limit_error',
+              message: "This request would exceed your account's rate limit.",
+            },
+          }),
+        }
+      : {}),
+    priority: credential.priority ?? null,
+    disabled: false,
+    cooldowns: cooldowns(credential, nowMs),
+    recent_requests: recentRequests(credential),
+    ...(credential.provider === 'claude' || credential.provider === 'codex'
+      ? { quota: passiveQuota(credential, nowMs) }
+      : {}),
+  };
+};
 
 const claudeUsage = (credential: MockCredential, nowMs: number) => {
   const weekly = mockWeeklyRemaining(credential, nowMs, nowMs);
@@ -174,6 +255,27 @@ const upstreamResponse = (body: Record<string, unknown>) => {
 
   if (!credential) return fail(404, 'unknown credential');
   if (credential.failing) return fail(503, 'mock upstream unavailable');
+  if (credential.setupToken && url.includes('api.anthropic.com/api/oauth/')) {
+    return {
+      status_code: 403,
+      header: {},
+      body: JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'permission_error',
+          message: 'OAuth token does not meet scope requirement user:profile',
+          details: { required_scopes: ['user:profile'], error_code: 'oauth_scope_insufficient' },
+        },
+      }),
+    };
+  }
+  if (credential.usageRetryAfterSeconds !== undefined && url.endsWith('/api/oauth/usage')) {
+    return {
+      status_code: 429,
+      header: { 'Retry-After': [String(credential.usageRetryAfterSeconds)] },
+      body: JSON.stringify({ error: { type: 'rate_limit_error', message: 'Rate limited.' } }),
+    };
+  }
   if (url.includes('/api/oauth/usage?cedar_ember')) {
     return ok({ cedar_ember: { eligible: false, at_limit: false, grants: [] } });
   }
