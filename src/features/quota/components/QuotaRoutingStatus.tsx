@@ -23,12 +23,8 @@ export function QuotaRoutingStatus({ status, nowMs, notes = [] }: QuotaRoutingSt
       <p className={styles.line} data-state={status.state}>
         <span className={styles.dot} aria-hidden="true" />
         <span className={styles.state}>{text.state}</span>
-        {text.details.map((detail) => (
-          <span key={detail} className={styles.detail}>
-            {detail}
-          </span>
-        ))}
       </p>
+      {text.details.length > 0 && <p className={styles.details}>{text.details.join(' · ')}</p>}
       {text.models && <p className={styles.note}>{text.models}</p>}
       {notes.map((note) => (
         <p key={note} className={styles.note}>

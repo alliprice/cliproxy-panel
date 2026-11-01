@@ -9,9 +9,8 @@
 
 .line {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 8px;
+  gap: 8px;
   margin: 0;
   font-family: $font-mono;
   font-size: 11.5px;
@@ -34,14 +33,13 @@
   color: var(--text-primary);
 }
 
-.detail {
+.details {
+  margin: 0 0 0 15px;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  line-height: 1.5;
   color: var(--text-secondary);
-
-  &::before {
-    content: '·';
-    margin-right: 8px;
-    color: var(--text-tertiary);
-  }
+  font-variant-numeric: tabular-nums;
 }
 
 .line[data-state='serving'] .dot {
@@ -63,7 +61,7 @@
 }
 
 .note {
-  margin: 0;
+  margin: 0 0 0 15px;
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--text-tertiary);
