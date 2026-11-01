@@ -14,7 +14,7 @@ import { Select } from '@/components/ui/Select';
 import type { ResolvedTheme } from '@/types';
 import { getTypeLabel } from '@/features/authFiles/constants';
 import { HOUR_MS, DAY_MS } from '@/utils/time/durations';
-import { getQuotaCacheKey } from '@/utils/quota/identity';
+import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import {
   FORECAST_ACCENTS,
   FORECAST_LOOKBACK_HOURS,
@@ -42,8 +42,10 @@ import {
 } from '../forecast/forecastWindows';
 import type { SnapshotsFor } from '../hooks/useQuotaHistory';
 import { meterAsOf, readQuotaMeters } from '../forecast/quotaMeters';
+import { partitionForForecast } from '../routing';
 import {
   stripCredentialExtension,
+  formatClockOrWeekday,
   formatCompactDuration,
   formatOutlookTime,
   formatPercent,
@@ -53,6 +55,7 @@ import {
 import { usePrivacyRevealed } from '../privacy';
 import { useMeterDisplay } from '../meterDisplay';
 import { ProviderIcon } from './ProviderIcon';
+import { PrivateValue } from './PrivateValue';
 import { DetailPopover } from './DetailPopover';
 import { QuotaForecastChart, type ChartMarker } from './QuotaForecastChart';
 import styles from './QuotaForecast.module.scss';
@@ -282,7 +285,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
     onLookbackHoursChange,
     onCollapsedChange,
   } = props;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { mode: displayMode } = useMeterDisplay();
   const [chartTab, setChartTab] = useState<ChartTab>('remaining');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -294,6 +297,14 @@ export function QuotaForecast(props: QuotaForecastProps) {
   const accent = FORECAST_ACCENTS[provider];
   const lookbackMs = lookbackHours * HOUR_MS;
 
+  // Credentials cooling down are left out: their last readings would claim
+  // capacity CLIProxyAPI cannot use until the cooldown ends.
+  const { usable, out } = useMemo(
+    () =>
+      partitionForForecast(entries, (entry) => readQuotaMeters(entry.type, quotaFor(entry)), nowMs),
+    [entries, nowMs, quotaFor]
+  );
+
   // One forecast per window. Each account's rate is its measured rate when its
   // readings cover enough time, else its window average (same rule as the rows).
   const views = useMemo(() => {
@@ -302,7 +313,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
       const rangeMs = RANGE_DAYS[window] * DAY_MS;
       const pastMs = rangeMs / 6;
       const windowHistory = snapshotsForWindow(history, window);
-      const live = entries
+      const live = usable
         .map((entry): LiveReading | null => {
           const meter = meterForWindow(
             readQuotaMeters(entry.type, quotaFor(entry)).map((item) => meterAsOf(item, nowMs)),
@@ -338,7 +349,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
       return { live, forecast, rangeMs, pastMs, windowHistory };
     };
     return { weekly: build('weekly'), session: build('session') };
-  }, [entries, history, lookbackMs, nowMs, quotaFor, snapshotsFor]);
+  }, [history, lookbackMs, nowMs, quotaFor, snapshotsFor, usable]);
 
   const hasSession = views.session.live.length > 0;
   const window: ForecastWindow =
@@ -379,11 +390,26 @@ export function QuotaForecast(props: QuotaForecastProps) {
     </span>
   ) : null;
 
+  const outNotes = out.map(({ entry, untilMs }) => (
+    <span key={getQuotaCacheKey(entry.file)} className={styles.outNote}>
+      <PrivateValue value={stripCredentialExtension(getQuotaDisplayName(entry.file))} />{' '}
+      {untilMs !== null
+        ? t('quota_management.forecast_out_until', {
+            time: formatClockOrWeekday(untilMs, nowMs, i18n.language),
+          })
+        : t('quota_management.forecast_out')}
+    </span>
+  ));
+
   if (live.length === 0) {
     return (
       <section className={`${styles.panel} ${styles.panelEmpty}`}>
         {providerLabel}
-        <p className={styles.empty}>{t('quota_management.forecast_empty')}</p>
+        {outNotes.length > 0 ? (
+          <p className={styles.totals}>{outNotes}</p>
+        ) : (
+          <p className={styles.empty}>{t('quota_management.forecast_empty')}</p>
+        )}
       </section>
     );
   }
@@ -472,6 +498,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
             {rateLabel(t, drain.ratePerHour)}
             <span className={styles.rateHint}>{rateHint}</span>
           </span>
+          {outNotes}
         </p>
         {hasSession && (
           <div

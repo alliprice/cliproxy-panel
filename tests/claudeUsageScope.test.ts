@@ -173,6 +173,6 @@ describe('setup tokens declared by the credential listing', () => {
 test('the setup-token message is translated in all six locales', async () => {
   for (const locale of ['en', 'zh-CN', 'zh-TW', 'ru', 'vi', 'ko']) {
     const messages = await Bun.file(`src/i18n/locales/${locale}.json`).json();
-    expect(messages.claude_quota.usage_scope_missing).toContain('user:profile');
+    expect(messages.claude_quota.usage_scope_missing).toContain('Setup');
   }
 });

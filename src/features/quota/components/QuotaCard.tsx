@@ -23,7 +23,10 @@ import { ClaudeResetGrantDetails } from '../providers/claude/ClaudeResetGrantDet
 import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
 import { hasClaudeUsageData } from '../providers/claude/data';
 import { useClaudeUsageUnavailable, useQuotaRateLimitedUntil } from '../hooks/useQuotaReadBlocks';
-import { formatRateLimitedUntil } from '../rateLimit';
+import { readingNotes } from '../rateLimit';
+import { credentialRoutingStatus, outUntilFor } from '../routing';
+import { quotaObservedAt } from '../hooks/useQuotaCache';
+import { QuotaRoutingStatus } from './QuotaRoutingStatus';
 import { stripCredentialExtension } from '../display';
 import { MeterDisplayContext, useMeterDisplay } from '../meterDisplay';
 import { runsOutAtPace, windowBurn } from '../forecast/burnRate';
@@ -125,11 +128,25 @@ export function QuotaCard(props: QuotaCardProps) {
       )}
     </>
   ) : undefined;
-  // "If you continue at this rate" for each window that has a known length.
-  const predictedMeters = orderedMeters(
-    readQuotaMeters(entry.type, quota).map((meter) => meterAsOf(meter, nowMs))
-  ).filter(
-    (meter) => meter.resetAtMs !== null && meter.periodHours !== null && meter.remaining < 100
+  const meters = readQuotaMeters(entry.type, quota);
+  const routing = credentialRoutingStatus(file, meters, nowMs);
+  const observedAt = (quota as { observedAt?: string | null } | undefined)?.observedAt;
+  const notes = readingNotes(
+    t,
+    {
+      usageUnavailable,
+      usageCheckPausedUntil: rateLimitedUntil,
+      observedAtMs: quotaObservedAt(quota) ?? (observedAt ? Date.parse(observedAt) : null),
+    },
+    nowMs,
+    i18n.language
+  );
+  // "If you continue at this rate" for each window that has a known length; a
+  // window a cooldown emptied says when it is back instead.
+  const predictedMeters = orderedMeters(meters.map((meter) => meterAsOf(meter, nowMs))).filter(
+    (meter) =>
+      outUntilFor(routing, meter.id) !== null ||
+      (meter.resetAtMs !== null && meter.periodHours !== null && meter.remaining < 100)
   );
   const meterRates = predictedMeters.map((meter) => ({
     meter,
@@ -174,17 +191,7 @@ export function QuotaCard(props: QuotaCardProps) {
 
       <MeterDisplayContext.Provider value={meterDisplay}>
         <div className={styles.body}>
-          {usageUnavailable ? (
-            <div role="status" className={quotaClasses.quotaMessage}>
-              {t('claude_quota.usage_scope_missing')}
-            </div>
-          ) : (
-            rateLimitedUntil !== null && (
-              <div role="status" className={quotaClasses.codexResetCreditsError}>
-                {formatRateLimitedUntil(t, rateLimitedUntil, nowMs, i18n.language)}
-              </div>
-            )
-          )}
+          <QuotaRoutingStatus status={routing} nowMs={nowMs} notes={notes} />
           {status === 'idle' ? (
             <button
               type="button"
@@ -243,7 +250,12 @@ export function QuotaCard(props: QuotaCardProps) {
           {meterRates.map(({ meter, rate }) => (
             <div key={meter.id} className={styles.predictionRow}>
               <span className={styles.predictionLabel}>{meterLabel(t, meter)}</span>
-              <QuotaPrediction meter={meter} nowMs={nowMs} rate={rate} />
+              <QuotaPrediction
+                meter={meter}
+                nowMs={nowMs}
+                rate={rate}
+                outUntilMs={outUntilFor(routing, meter.id)}
+              />
             </div>
           ))}
         </div>

@@ -77,6 +77,12 @@ export const formatClockTime = (ms: number, locale?: string): string =>
     new Date(ms).toLocaleTimeString(resolveLocale(locale), { hour: 'numeric', minute: '2-digit' })
   );
 
+/** `6:00 PM` for an instant on `nowMs`'s day, `Tue 10:00 PM` on another day. */
+export const formatClockOrWeekday = (ms: number, nowMs: number, locale?: string): string =>
+  new Date(ms).toDateString() === new Date(nowMs).toDateString()
+    ? formatClockTime(ms, locale)
+    : formatWeekdayTime(ms, locale);
+
 export const formatPercent = (value: number): string => `${Math.round(value)}%`;
 
 /** Smallest rate one decimal can show; anything below reads `<0.1%`, never `0.0%`. */

@@ -16,7 +16,8 @@ import type { QuotaProviderType } from '../providers/types';
 import { useClaudeResetGrants } from '../providers/claude/ClaudeResetGrants';
 import { claudeWeeklyResetAtMs } from '../providers/claude/resetGrantCache';
 import { useClaudeUsageUnavailable, useQuotaRateLimitedUntil } from '../hooks/useQuotaReadBlocks';
-import { formatRateLimitedUntil } from '../rateLimit';
+import { readingNotes } from '../rateLimit';
+import { credentialRoutingStatus, outUntilFor, routingText } from '../routing';
 import {
   exhaustedUntilMs,
   meterAsOf,
@@ -190,6 +191,15 @@ function LedgerRow(props: LedgerRowProps) {
   );
   const rateLimitedUntil = useQuotaRateLimitedUntil(entry.type, entry.file, nowMs);
   const usageUnavailable = useClaudeUsageUnavailable(entry.type, entry.file);
+  const routing = credentialRoutingStatus(entry.file, readQuotaMeters(entry.type, quota), nowMs);
+  const routingLine = routingText(t, routing, nowMs, i18n.language);
+  // "Last seen" already dates the reading; only the usage-check state is added.
+  const usageNotes = readingNotes(
+    t,
+    { usageUnavailable, usageCheckPausedUntil: rateLimitedUntil, observedAtMs: null },
+    nowMs,
+    i18n.language
+  );
 
   const backAtMs = exhaustedUntilMs(meters, nowMs);
   const resetText = (meter: QuotaMeterReading) =>
@@ -211,37 +221,42 @@ function LedgerRow(props: LedgerRowProps) {
           <ProviderIcon provider={entry.type} resolvedTheme={resolvedTheme} size="sm" />
           <PrivateValue className={styles.name} value={name} />
         </div>
+        <div
+          className={styles.metaLine}
+          title={[routingLine.state, ...routingLine.details].join(' · ')}
+        >
+          <span className={styles.routing} data-state={routing.state}>
+            {routingLine.state}
+          </span>
+          {routingLine.details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
+          {shownEmail && <PrivateValue className={styles.email} value={shownEmail} />}
+        </div>
         <div className={styles.metaLine}>
-          <span>{getTypeLabel(t, entry.type)}</span>
-          {usageUnavailable ? (
-            // Without readings the meters column carries the explanation instead.
-            meters.length > 0 && (
-              <span className={styles.alert} title={t('claude_quota.usage_scope_missing')}>
-                {t('claude_quota.usage_scope_missing')}
-              </span>
-            )
-          ) : rateLimitedUntil !== null ? (
-            <span className={styles.alert}>
-              {formatRateLimitedUntil(t, rateLimitedUntil, nowMs, i18n.language)}
-            </span>
-          ) : backAtMs !== null ? (
+          <span>
+            {lastSeenMs
+              ? t('quota_management.ledger_last_seen', {
+                  time: formatDateTime(lastSeenMs, i18n.language),
+                })
+              : t('quota_management.ledger_never_seen')}
+          </span>
+          {routingLine.models && <span>{routingLine.models}</span>}
+          {routing.state !== 'cooling' && backAtMs !== null && (
             <span className={styles.alert}>
               {t('quota_management.ledger_back_in', {
                 duration: formatCompactDuration(backAtMs - nowMs),
               })}
             </span>
-          ) : status === 'error' ? (
+          )}
+          {status === 'error' && !usageUnavailable && (
             <span className={styles.alert}>{t('quota_management.ledger_read_failed')}</span>
-          ) : shownEmail ? (
-            <PrivateValue className={styles.email} value={shownEmail} />
-          ) : null}
-        </div>
-        <div className={styles.metaLine}>
-          {lastSeenMs
-            ? t('quota_management.ledger_last_seen', {
-                time: formatDateTime(lastSeenMs, i18n.language),
-              })
-            : t('quota_management.ledger_never_seen')}
+          )}
+          {usageNotes.map((note) => (
+            <span key={note} className={styles.email} title={note}>
+              {note}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -281,8 +296,15 @@ function LedgerRow(props: LedgerRowProps) {
                   <MeterRate meter={meter} rate={rate} />
                 </div>
                 {/* An exhausted window's "back in" is already on the status line. */}
-                {meter.remaining > 0 && (
-                  <QuotaPrediction meter={meter} nowMs={nowMs} rate={rate} withRate={false} wrap />
+                {(meter.remaining > 0 || outUntilFor(routing, meter.id) !== null) && (
+                  <QuotaPrediction
+                    meter={meter}
+                    nowMs={nowMs}
+                    rate={rate}
+                    withRate={false}
+                    wrap
+                    outUntilMs={outUntilFor(routing, meter.id)}
+                  />
                 )}
               </div>
             );

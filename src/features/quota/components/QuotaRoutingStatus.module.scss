@@ -1,0 +1,70 @@
+/* Routing status: one mono telemetry line, colored by state; notes stay quiet. */
+
+.routing {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+  font-family: $font-mono;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  flex-shrink: 0;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.state {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detail {
+  color: var(--text-secondary);
+
+  &::before {
+    content: '·';
+    margin-right: 8px;
+    color: var(--text-tertiary);
+  }
+}
+
+.line[data-state='serving'] .dot {
+  background: var(--viz-success);
+}
+
+.line[data-state='cooling'] {
+  .dot {
+    background: var(--viz-failure);
+  }
+
+  .state {
+    color: var(--viz-failure);
+  }
+}
+
+.line[data-state='disabled'] .state {
+  color: var(--text-tertiary);
+}
+
+.note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}

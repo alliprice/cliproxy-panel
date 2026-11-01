@@ -8,7 +8,8 @@ import type { AuthFileItem } from '@/types';
 import { upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import { normalizeAuthIndex } from '@/utils/authIndex';
 import { createStatusError } from '@/utils/quota';
-import { formatClockTime, formatWeekdayTime } from './display';
+import { READING_AGE_NOTE_MS } from './constants';
+import { formatClockOrWeekday } from './display';
 import { claudeUsageUnavailable } from './providers/claude/usageScope';
 import type { QuotaProviderType } from './providers/types';
 
@@ -46,19 +47,52 @@ export const quotaReadBlocked = (provider: QuotaProviderType, file: AuthFileItem
   quotaRateLimitedUntil(provider, file) !== null ||
   (provider === 'claude' && claudeUsageUnavailable(file));
 
-/** `Rate limited until 3:05 PM`; a block that ends on a later day names the weekday. */
-export function formatRateLimitedUntil(
+/**
+ * `Usage check paused until 3:05 PM`: the panel's own usage reads wait out a
+ * 429. It says nothing about whether CLIProxyAPI routes to the credential.
+ */
+export function formatUsageCheckPaused(
   t: TFunction,
   until: number,
   nowMs = Date.now(),
   language?: string
 ): string {
-  const sameDay = new Date(until).toDateString() === new Date(nowMs).toDateString();
-  return t('quota_management.rate_limited_until', {
-    time: sameDay ? formatClockTime(until, language) : formatWeekdayTime(until, language),
+  return t('quota_management.usage_check_paused_until', {
+    time: formatClockOrWeekday(until, nowMs, language),
   });
 }
 
 /** The error a read refused by the backoff fails with (status 429, nothing was sent). */
 export const rateLimitedQuotaError = (t: TFunction, until: number) =>
-  createStatusError(formatRateLimitedUntil(t, until), 429);
+  createStatusError(formatUsageCheckPaused(t, until), 429);
+
+/**
+ * Secondary notes about the panel's own readings of a credential, never about
+ * routing: its usage check is paused or impossible, or its reading is old.
+ */
+export function readingNotes(
+  t: TFunction,
+  readings: {
+    usageUnavailable: boolean;
+    usageCheckPausedUntil: number | null;
+    /** When the shown reading was taken upstream. */
+    observedAtMs: number | null;
+  },
+  nowMs: number,
+  language?: string
+): string[] {
+  const notes: string[] = [];
+  if (readings.usageUnavailable) notes.push(t('claude_quota.usage_scope_missing'));
+  else if (readings.usageCheckPausedUntil !== null) {
+    notes.push(formatUsageCheckPaused(t, readings.usageCheckPausedUntil, nowMs, language));
+  }
+  const observedAtMs = readings.observedAtMs;
+  if (observedAtMs !== null && nowMs - observedAtMs > READING_AGE_NOTE_MS) {
+    notes.push(
+      t('quota_management.reading_as_of', {
+        time: formatClockOrWeekday(observedAtMs, nowMs, language),
+      })
+    );
+  }
+  return notes;
+}

@@ -93,6 +93,13 @@
   font-weight: 400;
 }
 
+/* A credential cooling down: named, and left out of the numbers. */
+.outNote {
+  flex-basis: 100%;
+  color: var(--viz-failure);
+  font-size: 12px;
+}
+
 /* 7-day / 5-hour: a small segmented switch next to the numbers. */
 .windowToggle {
   display: inline-flex;

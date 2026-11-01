@@ -25,7 +25,7 @@ import {
 } from '@/services/api/upstreamRateLimit';
 import { CLAUDE_CONFIG } from '@/features/quota/providers/claude/data';
 import { CODEX_CONFIG } from '@/features/quota/providers/codex/data';
-import { formatRateLimitedUntil, quotaRateLimitedUntil } from '@/features/quota/rateLimit';
+import { formatUsageCheckPaused, quotaRateLimitedUntil } from '@/features/quota/rateLimit';
 import { CLAUDE_PROFILE_URL, CLAUDE_USAGE_URL, CODEX_USAGE_URL } from '@/utils/quota';
 import { getStatusFromError } from '@/utils/quota';
 import { HOUR_MS, MINUTE_MS } from '@/utils/time/durations';
@@ -190,7 +190,7 @@ describe('quota reads inside a Retry-After window', () => {
       throw new Error('a blocked read must not succeed');
     } catch (error) {
       expect(getStatusFromError(error)).toBe(429);
-      expect((error as Error).message).toBe(formatRateLimitedUntil(t, until!));
+      expect((error as Error).message).toBe(formatUsageCheckPaused(t, until!));
     }
     expect(calls).toHaveLength(0);
   });
@@ -256,18 +256,18 @@ describe('quota reads inside a Retry-After window', () => {
 describe('rate-limit notice', () => {
   test('names the clock time today and the weekday on a later day', () => {
     const today = new Date(2026, 9, 31, 9, 0).getTime();
-    expect(formatRateLimitedUntil(t, new Date(2026, 9, 31, 15, 5).getTime(), today, 'en')).toBe(
-      'Rate limited until 3:05 PM'
+    expect(formatUsageCheckPaused(t, new Date(2026, 9, 31, 15, 5).getTime(), today, 'en')).toBe(
+      'Usage check paused until 3:05 PM'
     );
-    expect(formatRateLimitedUntil(t, new Date(2026, 10, 1, 9, 30).getTime(), today, 'en')).toBe(
-      'Rate limited until Sun 9:30 AM'
+    expect(formatUsageCheckPaused(t, new Date(2026, 10, 1, 9, 30).getTime(), today, 'en')).toBe(
+      'Usage check paused until Sun 9:30 AM'
     );
   });
 
   test('is translated in all six locales', async () => {
     for (const locale of ['en', 'zh-CN', 'zh-TW', 'ru', 'vi', 'ko']) {
       const messages = await Bun.file(`src/i18n/locales/${locale}.json`).json();
-      expect(messages.quota_management.rate_limited_until).toContain('{{time}}');
+      expect(messages.quota_management.usage_check_paused_until).toContain('{{time}}');
     }
   });
 });

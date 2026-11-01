@@ -17,7 +17,7 @@ import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { plainIdentity } from '../privacy';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
 import { getQuotaMap, getQuotaSetter, type QuotaAdapter, type QuotaCardState } from '../providers';
-import { formatRateLimitedUntil, quotaRateLimitedUntil } from '../rateLimit';
+import { formatUsageCheckPaused, quotaRateLimitedUntil } from '../rateLimit';
 import {
   claudeUsageUnavailable,
   forgetClaudeUsageScopeRefusal,
@@ -54,7 +54,7 @@ export function useQuotaActions(disableControls: boolean, revealNames = true) {
       // Inside an upstream Retry-After window a read only extends the lockout.
       const limitedUntil = quotaRateLimitedUntil(adapter.type, file);
       if (limitedUntil !== null) {
-        showNotification(formatRateLimitedUntil(t, limitedUntil), 'warning');
+        showNotification(formatUsageCheckPaused(t, limitedUntil), 'warning');
         return;
       }
       const cacheGeneration = captureQuotaCacheGeneration(file.name);

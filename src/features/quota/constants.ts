@@ -28,6 +28,9 @@ export const CARD_ENTRANCE_BUDGET_MS = 360;
 /** Page entry refreshes credentials whose shown data is older than this. */
 export const QUOTA_STALE_MS = 5 * 60_000;
 
+/** Readings older than this say when they were taken ("as of 7:11 PM"). */
+export const READING_AGE_NOTE_MS = 5 * 60_000;
+
 /** Card grid (upstream) or one row per credential. */
 export const QUOTA_VIEW_MODES = ['ledger', 'cards'] as const;
 

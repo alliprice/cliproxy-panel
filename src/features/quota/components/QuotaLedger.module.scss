@@ -168,6 +168,24 @@
   color: var(--viz-failure);
 }
 
+/* Routing status leads the row: what CLIProxyAPI does with the credential. */
+.routing {
+  font-weight: 600;
+  color: var(--text-primary);
+
+  &[data-state='serving'] {
+    color: var(--viz-success);
+  }
+
+  &[data-state='cooling'] {
+    color: var(--viz-failure);
+  }
+
+  &[data-state='disabled'] {
+    color: var(--text-tertiary);
+  }
+}
+
 /* ---------- meters ---------- */
 
 .meters {
