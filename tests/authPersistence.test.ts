@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { obfuscatedStorage } from '@/services/storage/secureStorage';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
+import { isCurrentObfuscated } from '@/utils/encryption';
+
+// Each query string loads a separate module instance, standing in for an earlier page load.
+const loadEncryption = (load: string) =>
+  import(`../src/utils/encryption.ts?load=${load}`) as Promise<
+    typeof import('@/utils/encryption')
+  >;
 
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -91,19 +98,41 @@ describe('v2 login persistence', () => {
     // Long enough to reach the User-Agent part of a UA-keyed XOR key, which is what corrupted it.
     const managementKey = 'test-only-key-'.repeat(8);
     setUserAgent(chrome(141));
-    obfuscatedStorage.setItem(STORAGE_KEY_AUTH, {
-      state: {
-        apiBase: 'http://127.0.0.1:8317',
-        managementKey,
-        rememberPassword: true,
-        serverVersion: '8.0.45',
-        serverBuildDate: '2026-10-27T15:23:26Z',
-      },
-      version: 0,
-    });
+    const earlierPageLoad = await loadEncryption('chrome-141');
+    values.set(
+      STORAGE_KEY_AUTH,
+      earlierPageLoad.obfuscateData(
+        JSON.stringify({
+          state: {
+            apiBase: 'http://127.0.0.1:8317',
+            managementKey,
+            rememberPassword: true,
+            serverVersion: '8.0.45',
+            serverBuildDate: '2026-10-27T15:23:26Z',
+          },
+          version: 0,
+        })
+      )
+    );
     setUserAgent(chrome(142));
     await useAuthStore.persist.rehydrate();
     expect(useAuthStore.getState().managementKey).toBe(managementKey);
+  });
+
+  test('a remembered login is saved by the store and restored on the next load', async () => {
+    useAuthStore.setState({
+      apiBase: 'http://127.0.0.1:8317',
+      managementKey: 'test-key',
+      rememberPassword: true,
+    });
+    const saved = values.get(STORAGE_KEY_AUTH) ?? '';
+    expect(isCurrentObfuscated(saved)).toBe(true);
+    // Clear the in-memory key so only the saved record can bring it back.
+    useAuthStore.setState({ managementKey: '' });
+    values.set(STORAGE_KEY_AUTH, saved);
+    await useAuthStore.persist.rehydrate();
+    expect(useAuthStore.getState().managementKey).toBe('test-key');
+    expect(useAuthStore.getState().rememberPassword).toBe(true);
   });
 
   test('does not persist a key when remember password is disabled', () => {

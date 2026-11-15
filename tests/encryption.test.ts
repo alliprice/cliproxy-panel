@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { deobfuscateData, isCurrentObfuscated, obfuscateData } from '@/utils/encryption';
+import { isCurrentObfuscated, obfuscateData } from '@/utils/encryption';
+
+// Each query string loads a separate module instance, standing in for a fresh page load.
+const loadEncryption = (load: string) =>
+  import(`../src/utils/encryption.ts?load=${load}`) as Promise<
+    typeof import('@/utils/encryption')
+  >;
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -15,7 +21,7 @@ afterEach(() => {
 });
 
 describe('v2 storage obfuscation', () => {
-  test('new values remain readable when the browser UA changes', () => {
+  test('a value saved before a browser update reads back after it', async () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: { location: { host: 'panel.example.com' } },
@@ -24,16 +30,18 @@ describe('v2 storage obfuscation', () => {
       configurable: true,
       value: { userAgent: 'Firefox/158.0' },
     });
+    const beforeUpdate = await loadEncryption('before-update');
     // Long enough to exercise the UA-dependent portion of the old XOR key.
     const value = JSON.stringify({ managementKey: 'test-only-'.repeat(100), label: '测试' });
-    const encoded = obfuscateData(value);
+    const encoded = beforeUpdate.obfuscateData(value);
     expect(encoded.startsWith('enc::v2::')).toBe(true);
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
       value: { userAgent: 'Firefox/159.0' },
     });
-    expect(deobfuscateData(encoded)).toBe(value);
-    expect(obfuscateData(value)).toBe(encoded);
+    const afterUpdate = await loadEncryption('after-update');
+    expect(afterUpdate.deobfuscateData(encoded)).toBe(value);
+    expect(afterUpdate.obfuscateData(value)).toBe(encoded);
   });
 
   test('auth format detection rejects legacy and plaintext values', () => {
