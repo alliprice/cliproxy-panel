@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AuthState, LoginCredentials, ConnectionStatus } from '@/types';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
+import { isCurrentObfuscated } from '@/utils/encryption';
 import { obfuscatedStorage } from '@/services/storage/secureStorage';
 import { apiClient } from '@/services/api/client';
 import { LegacyBackendError, probeLegacyBackend } from '@/services/api/legacyBackendProbe';
@@ -47,21 +48,16 @@ export const useAuthStore = create<AuthStoreState>()(
         if (restoreSessionPromise) return restoreSessionPromise;
 
         restoreSessionPromise = (async () => {
-          obfuscatedStorage.migratePlaintextKeys(['apiBase', 'apiUrl', 'managementKey']);
-
           const wasLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
           const legacyBase =
             obfuscatedStorage.getItem<string>('apiBase') ||
             obfuscatedStorage.getItem<string>('apiUrl', { encrypt: true });
-          const legacyKey = obfuscatedStorage.getItem<string>('managementKey');
-
           const { apiBase, managementKey, rememberPassword } = get();
           const resolvedBase = normalizeApiBase(
             apiBase || legacyBase || detectApiBaseFromLocation()
           );
-          const resolvedKey = managementKey || legacyKey || '';
-          const resolvedRememberPassword =
-            rememberPassword || Boolean(managementKey) || Boolean(legacyKey);
+          const resolvedKey = managementKey || '';
+          const resolvedRememberPassword = rememberPassword;
 
           set({
             apiBase: resolvedBase,
@@ -215,6 +211,14 @@ export const useAuthStore = create<AuthStoreState>()(
       name: STORAGE_KEY_AUTH,
       storage: createJSONStorage(() => ({
         getItem: (name) => {
+          // Retire all pre-v2 login credentials without decoding or migrating them.
+          localStorage.removeItem('managementKey');
+          const raw = localStorage.getItem(name);
+          if (!raw || !isCurrentObfuscated(raw)) {
+            localStorage.removeItem(name);
+            localStorage.removeItem('isLoggedIn');
+            return null;
+          }
           const data = obfuscatedStorage.getItem<AuthStoreState>(name);
           return data ? JSON.stringify(data) : null;
         },
