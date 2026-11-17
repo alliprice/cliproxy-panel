@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AuthState, LoginCredentials, ConnectionStatus } from '@/types';
-import { STORAGE_KEY_AUTH } from '@/utils/constants';
+import { STORAGE_KEY_AUTH, STORAGE_KEY_MANAGEMENT_KEY } from '@/utils/constants';
 import { isCurrentObfuscated } from '@/utils/encryption';
 import { obfuscatedStorage } from '@/services/storage/secureStorage';
 import { apiClient } from '@/services/api/client';
@@ -33,6 +33,34 @@ interface AuthStoreState extends AuthState {
 }
 
 let restoreSessionPromise: Promise<boolean> | null = null;
+
+/*
+ * The saved key has its own entry. zustand persist rewrites the whole STORAGE_KEY_AUTH record on
+ * every set(), so a key kept there is lost whenever any state without it is saved, for example
+ * by another tab. Only login() with Remember ticked writes the entry; only clearSavedLogin()
+ * removes it.
+ */
+const readSavedManagementKey = (): string => {
+  const key = obfuscatedStorage.getItem<unknown>(STORAGE_KEY_MANAGEMENT_KEY);
+  return typeof key === 'string' ? key : '';
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** Moves a key that an earlier build saved inside the persist record into its own entry. */
+const moveRecordKeyToEntry = (data: Record<string, unknown>): Record<string, unknown> => {
+  if (!isRecord(data.state) || !('managementKey' in data.state)) return data;
+  const { managementKey, ...state } = data.state;
+  if (
+    typeof managementKey === 'string' &&
+    managementKey &&
+    localStorage.getItem(STORAGE_KEY_MANAGEMENT_KEY) === null
+  ) {
+    obfuscatedStorage.setItem(STORAGE_KEY_MANAGEMENT_KEY, managementKey);
+  }
+  return { ...data, state };
+};
 
 export const useAuthStore = create<AuthStoreState>()(
   persist(
@@ -77,7 +105,8 @@ export const useAuthStore = create<AuthStoreState>()(
                 managementKey: resolvedKey,
                 rememberPassword: resolvedRememberPassword,
               });
-              return true;
+              // False when a sign-out during the request discarded its result.
+              return get().isAuthenticated;
             } catch (error) {
               console.warn('Auto login failed:', error);
               return false;
@@ -129,6 +158,9 @@ export const useAuthStore = create<AuthStoreState>()(
             throw error;
           }
 
+          // A sign-out or another login changed the connection while the request was outstanding.
+          if (revision !== apiClient.getConnectionRevision()) return;
+
           // 登录成功
           set({
             isAuthenticated: true,
@@ -138,8 +170,10 @@ export const useAuthStore = create<AuthStoreState>()(
             connectionStatus: 'connected',
           });
           if (rememberPassword) {
+            obfuscatedStorage.setItem(STORAGE_KEY_MANAGEMENT_KEY, managementKey);
             localStorage.setItem('isLoggedIn', 'true');
           } else {
+            // Without Remember the new key is not saved, and a key saved earlier stays saved.
             localStorage.removeItem('isLoggedIn');
           }
         } catch (error: unknown) {
@@ -167,13 +201,16 @@ export const useAuthStore = create<AuthStoreState>()(
 
       clearSavedLogin: () => {
         get().signOut();
+        obfuscatedStorage.removeItem(STORAGE_KEY_MANAGEMENT_KEY);
         set({ apiBase: '', managementKey: '', rememberPassword: false });
       },
 
       hasRestorableSession: () => {
         const { apiBase, managementKey } = get();
         return (
-          localStorage.getItem('isLoggedIn') === 'true' && Boolean(apiBase) && Boolean(managementKey)
+          localStorage.getItem('isLoggedIn') === 'true' &&
+          Boolean(apiBase) &&
+          Boolean(managementKey)
         );
       },
 
@@ -189,9 +226,13 @@ export const useAuthStore = create<AuthStoreState>()(
           // 重新配置客户端
           apiClient.setConfig({ apiBase, managementKey });
           set({ supportsPlugin: false });
+          const revision = apiClient.getConnectionRevision();
 
           // 验证连接
           await useConfigStore.getState().fetchConfig();
+
+          // A sign-out while the request was outstanding must not be undone by its response.
+          if (revision !== apiClient.getConnectionRevision()) return false;
 
           set({
             isAuthenticated: true,
@@ -228,10 +269,12 @@ export const useAuthStore = create<AuthStoreState>()(
           const raw = localStorage.getItem(name);
           if (!raw) return null;
           const data = obfuscatedStorage.getItem<unknown>(name);
-          if (!data || typeof data !== 'object') return null;
-          // Re-save a login stored in an older format. Loading never deletes a saved login.
-          if (!isCurrentObfuscated(raw)) obfuscatedStorage.setItem(name, data);
-          return JSON.stringify(data);
+          if (!isRecord(data)) return null;
+          const record = moveRecordKeyToEntry(data);
+          // Re-save a record in an older format or one that held the key. Loading never deletes
+          // a saved login.
+          if (record !== data || !isCurrentObfuscated(raw)) obfuscatedStorage.setItem(name, record);
+          return JSON.stringify(record);
         },
         setItem: (name, value) => {
           obfuscatedStorage.setItem(name, JSON.parse(value));
@@ -240,9 +283,14 @@ export const useAuthStore = create<AuthStoreState>()(
           obfuscatedStorage.removeItem(name);
         },
       })),
+      // The key is never part of this record; it comes from its own entry on every load.
+      merge: (persisted, current) => ({
+        ...current,
+        ...(isRecord(persisted) ? (persisted as Partial<AuthStoreState>) : {}),
+        managementKey: readSavedManagementKey(),
+      }),
       partialize: (state) => ({
         apiBase: state.apiBase,
-        ...(state.rememberPassword ? { managementKey: state.managementKey } : {}),
         rememberPassword: state.rememberPassword,
         serverVersion: state.serverVersion,
         serverBuildDate: state.serverBuildDate,

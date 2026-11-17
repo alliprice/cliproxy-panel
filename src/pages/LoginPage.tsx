@@ -167,6 +167,8 @@ export function LoginPage() {
         managementKey: managementKey.trim(),
         rememberPassword,
       });
+      // A sign-out during the request discards its result; stay on the login form.
+      if (!useAuthStore.getState().isAuthenticated) return;
       showNotification(t('common.connected_status'), 'success');
       navigate('/', { replace: true });
     } catch (err: unknown) {

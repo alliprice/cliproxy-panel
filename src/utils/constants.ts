@@ -30,6 +30,8 @@ export const MAX_AUTH_FILE_SIZE = 10 * 1024 * 1024;
 
 // 本地存储键名
 export const STORAGE_KEY_AUTH = 'cli-proxy-auth';
+// The saved management key, kept out of STORAGE_KEY_AUTH so writing that record cannot delete it.
+export const STORAGE_KEY_MANAGEMENT_KEY = 'cli-proxy-management-key';
 export const STORAGE_KEY_THEME = 'cli-proxy-theme';
 export const STORAGE_KEY_LANGUAGE = 'cli-proxy-language';
 
