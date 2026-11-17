@@ -9,11 +9,13 @@ export function ProtectedRoute({ children }: { children: ReactElement }) {
   const managementKey = useAuthStore((state) => state.managementKey);
   const apiBase = useAuthStore((state) => state.apiBase);
   const checkAuth = useAuthStore((state) => state.checkAuth);
+  const hasRestorableSession = useAuthStore((state) => state.hasRestorableSession);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     const tryRestore = async () => {
-      if (!isAuthenticated && managementKey && apiBase) {
+      // After a sign-out the key stays saved, so a saved key alone must not log back in.
+      if (!isAuthenticated && hasRestorableSession()) {
         setChecking(true);
         try {
           await checkAuth();
@@ -23,7 +25,7 @@ export function ProtectedRoute({ children }: { children: ReactElement }) {
       }
     };
     tryRestore();
-  }, [apiBase, isAuthenticated, managementKey, checkAuth]);
+  }, [apiBase, isAuthenticated, managementKey, checkAuth, hasRestorableSession]);
 
   if (checking) {
     return (

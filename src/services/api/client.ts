@@ -183,7 +183,7 @@ class ApiClient {
       apiError.details = responseData;
       apiError.data = responseData;
 
-      // Dispatch logout for unauthorized responses
+      // Sign out on unauthorized responses; the saved key is kept
       if (this.emitEvents() && error.response?.status === 401) {
         window.dispatchEvent(new Event('unauthorized'));
       }

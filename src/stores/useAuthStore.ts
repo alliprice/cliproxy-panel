@@ -21,7 +21,11 @@ interface AuthStoreState extends AuthState {
 
   // 操作
   login: (credentials: LoginCredentials) => Promise<void>;
-  logout: () => void;
+  /** Ends the session and keeps the saved key, so the login form shows it again. */
+  signOut: () => void;
+  /** The only action that deletes the saved key. */
+  clearSavedLogin: () => void;
+  hasRestorableSession: () => boolean;
   checkAuth: () => Promise<boolean>;
   restoreSession: () => Promise<boolean>;
   updateServerVersion: (version: string | null, buildDate?: string | null) => void;
@@ -144,8 +148,7 @@ export const useAuthStore = create<AuthStoreState>()(
         }
       },
 
-      // 登出
-      logout: () => {
+      signOut: () => {
         restoreSessionPromise = null;
         apiClient.setConfig({ apiBase: '', managementKey: '' });
         useConfigStore.getState().clearCache();
@@ -153,14 +156,25 @@ export const useAuthStore = create<AuthStoreState>()(
         useQuotaStore.getState().clearQuotaCache();
         set({
           isAuthenticated: false,
-          apiBase: '',
-          managementKey: '',
           serverVersion: null,
           serverBuildDate: null,
           supportsPlugin: false,
           connectionStatus: 'disconnected',
         });
+        // No automatic login on the next load; the login form offers the saved key instead.
         localStorage.removeItem('isLoggedIn');
+      },
+
+      clearSavedLogin: () => {
+        get().signOut();
+        set({ apiBase: '', managementKey: '', rememberPassword: false });
+      },
+
+      hasRestorableSession: () => {
+        const { apiBase, managementKey } = get();
+        return (
+          localStorage.getItem('isLoggedIn') === 'true' && Boolean(apiBase) && Boolean(managementKey)
+        );
       },
 
       // 检查认证状态
@@ -211,16 +225,13 @@ export const useAuthStore = create<AuthStoreState>()(
       name: STORAGE_KEY_AUTH,
       storage: createJSONStorage(() => ({
         getItem: (name) => {
-          // Retire all pre-v2 login credentials without decoding or migrating them.
-          localStorage.removeItem('managementKey');
           const raw = localStorage.getItem(name);
-          if (!raw || !isCurrentObfuscated(raw)) {
-            localStorage.removeItem(name);
-            localStorage.removeItem('isLoggedIn');
-            return null;
-          }
-          const data = obfuscatedStorage.getItem<AuthStoreState>(name);
-          return data ? JSON.stringify(data) : null;
+          if (!raw) return null;
+          const data = obfuscatedStorage.getItem<unknown>(name);
+          if (!data || typeof data !== 'object') return null;
+          // Re-save a login stored in an older format. Loading never deletes a saved login.
+          if (!isCurrentObfuscated(raw)) obfuscatedStorage.setItem(name, data);
+          return JSON.stringify(data);
         },
         setItem: (name, value) => {
           obfuscatedStorage.setItem(name, JSON.parse(value));
@@ -243,7 +254,7 @@ export const useAuthStore = create<AuthStoreState>()(
 // 监听全局未授权事件
 if (typeof window !== 'undefined') {
   window.addEventListener('unauthorized', () => {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().signOut();
   });
 
   window.addEventListener('server-version-update', ((e: CustomEvent) => {

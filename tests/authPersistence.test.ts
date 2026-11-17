@@ -28,7 +28,12 @@ beforeEach(() => {
       removeItem: (key: string) => values.delete(key),
     },
   });
-  useAuthStore.setState({ isAuthenticated: false, apiBase: '', managementKey: '' });
+  useAuthStore.setState({
+    isAuthenticated: false,
+    apiBase: '',
+    managementKey: '',
+    rememberPassword: false,
+  });
 });
 
 afterEach(() => {
@@ -42,33 +47,50 @@ afterEach(() => {
   }
 });
 
-describe('v2 login persistence', () => {
-  test.each(['enc::v1::obsolete', '{"state":{"managementKey":"old-key"}}'])(
-    'discards old auth storage without migrating it: %s',
-    async (raw) => {
-      values.set(STORAGE_KEY_AUTH, raw);
-      values.set('managementKey', 'legacy-key');
-      values.set('isLoggedIn', 'true');
-      values.set('theme', 'dark');
-      values.set('language', 'zh-CN');
-      await useAuthStore.persist.rehydrate();
-      expect(useAuthStore.getState().managementKey).toBe('');
-      expect(values.has(STORAGE_KEY_AUTH)).toBe(false);
-      expect(values.has('managementKey')).toBe(false);
-      expect(values.has('isLoggedIn')).toBe(false);
-      expect(values.get('theme')).toBe('dark');
-      expect(values.get('language')).toBe('zh-CN');
-    }
-  );
+// The v1 format the previous build wrote: XOR keyed by salt, host and User-Agent.
+const encodeV1 = (value: string, host: string, userAgent: string) => {
+  const key = new TextEncoder().encode(`cli-proxy-api-webui::secure-storage|${host}|${userAgent}`);
+  const bytes = new TextEncoder().encode(value).map((byte, i) => byte ^ key[i % key.length]);
+  return `enc::v1::${btoa(String.fromCharCode(...bytes))}`;
+};
 
-  test('does not restore standalone legacy credentials without an auth record', async () => {
-    values.delete(STORAGE_KEY_AUTH);
-    values.set('managementKey', 'legacy-key');
+const savedRecord = () =>
+  obfuscatedStorage.getItem<{ state: { managementKey?: string } }>(STORAGE_KEY_AUTH);
+
+describe('v2 login persistence', () => {
+  test('converts a login saved by the previous build instead of deleting it', async () => {
+    const host = '127.0.0.1:8317';
+    const userAgent = 'Mozilla/5.0 (Macintosh; rv:160.0) Gecko/20100101 Firefox/160.0';
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { host } },
+    });
+    setUserAgent(userAgent);
+    const state = { apiBase: `http://${host}`, managementKey: 'test-key', rememberPassword: true };
+    values.set(STORAGE_KEY_AUTH, encodeV1(JSON.stringify({ state, version: 0 }), host, userAgent));
+    values.set('isLoggedIn', 'true');
+    await useAuthStore.persist.rehydrate();
+    expect(useAuthStore.getState().managementKey).toBe('test-key');
+    expect(isCurrentObfuscated(values.get(STORAGE_KEY_AUTH) ?? '')).toBe(true);
+    expect(savedRecord()?.state.managementKey).toBe('test-key');
+    expect(values.get('isLoggedIn')).toBe('true');
+  });
+
+  test('converts a plaintext saved login instead of deleting it', async () => {
+    values.set(STORAGE_KEY_AUTH, '{"state":{"managementKey":"old-key"},"version":0}');
+    values.set('isLoggedIn', 'true');
+    await useAuthStore.persist.rehydrate();
+    expect(useAuthStore.getState().managementKey).toBe('old-key');
+    expect(isCurrentObfuscated(values.get(STORAGE_KEY_AUTH) ?? '')).toBe(true);
+    expect(values.get('isLoggedIn')).toBe('true');
+  });
+
+  test('loading an unreadable record restores nothing and deletes nothing', async () => {
+    values.set(STORAGE_KEY_AUTH, 'enc::v1::obsolete');
     values.set('isLoggedIn', 'true');
     await useAuthStore.persist.rehydrate();
     expect(useAuthStore.getState().managementKey).toBe('');
-    expect(values.has('managementKey')).toBe(false);
-    expect(values.has('isLoggedIn')).toBe(false);
+    expect(values.get('isLoggedIn')).toBe('true');
   });
 
   test('restores a new remembered login', async () => {
@@ -141,5 +163,55 @@ describe('v2 login persistence', () => {
       STORAGE_KEY_AUTH
     );
     expect(saved?.state.managementKey).toBeUndefined();
+  });
+});
+
+describe('only clearing login data deletes the saved key', () => {
+  const rememberedLogin = () => {
+    useAuthStore.setState({
+      isAuthenticated: true,
+      apiBase: 'http://127.0.0.1:8317',
+      managementKey: 'test-key',
+      rememberPassword: true,
+    });
+    values.set('isLoggedIn', 'true');
+  };
+
+  test('signing out keeps the saved key and stops automatic login', () => {
+    rememberedLogin();
+    expect(useAuthStore.getState().hasRestorableSession()).toBe(true);
+    useAuthStore.getState().signOut();
+    const state = useAuthStore.getState();
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.managementKey).toBe('test-key');
+    expect(state.rememberPassword).toBe(true);
+    expect(savedRecord()?.state.managementKey).toBe('test-key');
+    expect(values.has('isLoggedIn')).toBe(false);
+    expect(state.hasRestorableSession()).toBe(false);
+  });
+
+  test('clearing login data deletes the saved key', () => {
+    rememberedLogin();
+    useAuthStore.getState().clearSavedLogin();
+    expect(useAuthStore.getState().managementKey).toBe('');
+    expect(useAuthStore.getState().rememberPassword).toBe(false);
+    expect(savedRecord()?.state.managementKey).toBeFalsy();
+    expect(values.has('isLoggedIn')).toBe(false);
+  });
+
+  test('a 401 and the Logout button sign out; the System page clears the key', async () => {
+    const store = await Bun.file('src/stores/useAuthStore.ts').text();
+    expect(store).toMatch(
+      /addEventListener\('unauthorized', \(\) => \{\s*useAuthStore\.getState\(\)\.signOut\(\);/
+    );
+    const layout = await Bun.file('src/components/layout/MainLayout.tsx').text();
+    expect(layout).toContain('onClick={signOut}');
+    const system = await Bun.file('src/pages/SystemPage.tsx').text();
+    expect(system).toContain('auth.clearSavedLogin();');
+  });
+
+  test('a protected page logs back in only from a restorable session', async () => {
+    const source = await Bun.file('src/router/ProtectedRoute.tsx').text();
+    expect(source).toContain('if (!isAuthenticated && hasRestorableSession())');
   });
 });

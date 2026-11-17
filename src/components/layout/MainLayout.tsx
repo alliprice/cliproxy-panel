@@ -311,7 +311,7 @@ export function MainLayout() {
   const { showNotification } = useNotificationStore();
   const location = useLocation();
 
-  const logout = useAuthStore((state) => state.logout);
+  const signOut = useAuthStore((state) => state.signOut);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const apiBase = useAuthStore((state) => state.apiBase);
   const supportsPlugin = useAuthStore((state) => state.supportsPlugin);
@@ -1131,7 +1131,7 @@ export function MainLayout() {
               </div>
             )}
           </div>
-          <Button variant="ghost" size="sm" onClick={logout} title={t('header.logout')}>
+          <Button variant="ghost" size="sm" onClick={signOut} title={t('header.logout')}>
             {headerIcons.logout}
           </Button>
         </div>
