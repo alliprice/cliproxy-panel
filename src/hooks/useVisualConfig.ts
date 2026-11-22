@@ -434,6 +434,7 @@ export function parseRoutingStrategy(raw: unknown): RoutingStrategy {
     return 'weighted-round-robin';
   }
   if (['fill-first', 'fillfirst', 'ff'].includes(normalized)) return 'fill-first';
+  if (['expiring-first', 'expiringfirst'].includes(normalized)) return 'expiring-first';
   return 'round-robin';
 }
 

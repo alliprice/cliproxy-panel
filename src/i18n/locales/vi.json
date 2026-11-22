@@ -214,7 +214,8 @@
     "ws_auth_enable": "Yêu cầu xác thực cho /ws/*",
     "routing_strategy_round_robin": "round-robin (luân phiên)",
     "routing_strategy_weighted_round_robin": "weighted-round-robin (luân phiên có trọng số)",
-    "routing_strategy_fill_first": "fill-first (ưu tiên lấp đầy)"
+    "routing_strategy_fill_first": "fill-first (ưu tiên lấp đầy)",
+    "routing_strategy_expiring_first": "expiring-first (đặt lại sớm nhất)"
   },
   "auth_files": {
     "title": "Quản lý File xác thực",
@@ -1229,6 +1230,7 @@
           "strategy_round_robin": "Round Robin",
           "strategy_weighted_round_robin": "Weighted Round Robin",
           "strategy_fill_first": "Fill First",
+          "strategy_expiring_first": "Hết hạn trước (Expiring First)",
           "session_affinity_ttl": "TTL Session Affinity",
           "force_model_prefix": "Bắt buộc tiền tố model",
           "force_model_prefix_desc": "Yêu cầu model không có tiền tố chỉ dùng credential không có tiền tố",

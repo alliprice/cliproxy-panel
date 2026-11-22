@@ -214,7 +214,8 @@
     "ws_auth_enable": "/ws/* 경로에 인증 요구",
     "routing_strategy_round_robin": "round-robin (순환)",
     "routing_strategy_weighted_round_robin": "weighted-round-robin (가중 순환)",
-    "routing_strategy_fill_first": "fill-first (우선 채우기)"
+    "routing_strategy_fill_first": "fill-first (우선 채우기)",
+    "routing_strategy_expiring_first": "expiring-first (가장 빨리 초기화)"
   },
   "auth_files": {
     "title": "인증 파일 관리",
@@ -1439,6 +1440,7 @@
           "strategy_round_robin": "라운드 로빈",
           "strategy_weighted_round_robin": "가중 라운드 로빈",
           "strategy_fill_first": "채우기 우선",
+          "strategy_expiring_first": "만료 임박 우선",
           "session_affinity_ttl": "세션 어피니티 TTL",
           "force_model_prefix": "모델 접두사 강제",
           "force_model_prefix_desc": "접두사가 없는 모델 요청은 접두사가 없는 자격 증명만 사용합니다.",

@@ -35,6 +35,10 @@ export function SectionNetwork({
       value: 'fill-first',
       label: t('config_management.visual.sections.network.strategy_fill_first'),
     },
+    {
+      value: 'expiring-first',
+      label: t('config_management.visual.sections.network.strategy_expiring_first'),
+    },
   ];
 
   const disableImageGenerationOptions: Array<{ value: DisableImageGeneration; label: string }> = [
