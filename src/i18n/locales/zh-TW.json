@@ -801,7 +801,7 @@
     "diagram_rename_btn": "重新命名",
     "diagram_add_btn": "新增",
     "diagram_settings": "設定",
-    "diagram_settings_title": "別名設定 — {{alias}}",
+    "diagram_settings_title": "別名設定 - {{alias}}",
     "diagram_settings_source_title": "來源模型設定",
     "diagram_settings_empty": "該別名暫無映射。",
     "diagram_tap_hint": "觸控設備上：先點選來源模型，再點選別名即可建立映射。",
@@ -1215,7 +1215,7 @@
         },
         "transientErrorCooldownSeconds": {
           "label": "暫時性錯誤冷卻時間（秒）",
-          "hint": "適用於上游 408/500/502/503/504/520–526 錯誤。0 使用預設的 60 秒冷卻時間，負數停用此類冷卻。"
+          "hint": "適用於上游 408/500/502/503/504/520-526 錯誤。0 使用預設的 60 秒冷卻時間，負數停用此類冷卻。"
         },
         "videoResultAuthCacheTTL": {
           "label": "影片結果憑證快取有效期",
@@ -1581,7 +1581,7 @@
       },
       "validation": {
         "invalid_trusted_proxies": "每個可信任代理必須是有效的 IP 位址或 CIDR。",
-        "invalid_discovery_service_type": "請使用 _名稱._tcp 格式：名稱為 1–15 位英文字母、數字或連字號，首尾不能是連字號。",
+        "invalid_discovery_service_type": "請使用 _名稱._tcp 格式：名稱為 1-15 位英文字母、數字或連字號，首尾不能是連字號。",
         "validation_blocked": "請先修復表單驗證錯誤再儲存",
         "invalid_duration": "請輸入有效的時間長度，例如 30s 或 3h",
         "positive_duration": "請輸入大於零的時間長度",
@@ -1894,7 +1894,7 @@
     "no_matches_desc": "目前搜尋或篩選條件下沒有插件。",
     "clear_filters": "清除篩選",
     "security_banner_title": "第三方插件以後端完整權限執行",
-    "security_banner_text": "插件會在代理服務內部執行程式碼，可讀取你的憑證與流量。請僅安裝你信任的插件——尤其要警惕任何並非由官方組織 router-for-me 發布的插件。",
+    "security_banner_text": "插件會在代理服務內部執行程式碼，可讀取你的憑證與流量。請僅安裝你信任的插件，尤其要警惕任何並非由官方組織 router-for-me 發布的插件。",
     "badge_untrusted": "第三方",
     "gate_title": "安裝 {{name}}",
     "gate_title_update": "更新 {{name}}",

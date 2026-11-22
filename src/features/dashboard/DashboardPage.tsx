@@ -21,7 +21,7 @@ import { useCountUp, useRevealGroup, useRevealOnScroll } from '@/hooks/motion';
 import { providerLabel, splitWindowMinutes, toneForSuccessRate, type MeterTone } from './utils';
 import styles from './dashboard.module.scss';
 
-const DASH = '—';
+const DASH = '-';
 
 /** KPI 卡左上角色签：有语义色调的卡用状态色，其余保持中性 */
 const TILE_ACCENTS: Record<MeterTone, string> = {

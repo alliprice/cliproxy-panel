@@ -724,7 +724,7 @@
     "list_aria": "Models",
     "no_results": "No model matches “{{query}}”",
     "catalog_loading": "Loading models…",
-    "catalog_unavailable": "Model list unavailable — rules still apply.",
+    "catalog_unavailable": "Model list unavailable - rules still apply.",
     "catalog_error": "Could not load models.",
     "catalog_retry": "Retry",
     "catalog_empty": "No models to list.",
@@ -735,7 +735,7 @@
     "badge_wildcard": "By rule",
     "badge_unknown": "Not in list",
     "wildcard_reason": "Matched by rule {{rule}}",
-    "wildcard_locked": "Excluded by rule {{rule}} — edit the rule below",
+    "wildcard_locked": "Excluded by rule {{rule}} - edit the rule below",
     "also_wildcard": "Also matched by {{rule}}",
     "chips_more": "+{{n}} more",
     "chip_remove": "Stop excluding {{rule}}",
@@ -744,7 +744,7 @@
     "rules_hint": "* matches any characters. Matching is case-insensitive.",
     "rules_match_count": "matches {{n}} models",
     "rules_match_none": "matches no model in the list",
-    "rules_reserved": "“*” disables the whole provider — use the Disabled switch instead"
+    "rules_reserved": "“*” disables the whole provider - use the Disabled switch instead"
   },
   "oauth_model_alias": {
     "editor_description": "Give provider models consistent names for use in your clients.",
@@ -780,7 +780,7 @@
     "delete_failed": "Failed to delete model aliases",
     "no_models": "No model aliases",
     "model_count": "{{count}} aliases",
-    "list_empty_all": "No model aliases yet—use “Add Alias” to create one.",
+    "list_empty_all": "No model aliases yet - use “Add Alias” to create one.",
     "chart_title": "All mappings overview",
     "diagram_providers": "Providers",
     "diagram_source_models": "Source Models",
@@ -802,7 +802,7 @@
     "diagram_rename_btn": "Rename",
     "diagram_add_btn": "Add",
     "diagram_settings": "Settings",
-    "diagram_settings_title": "Alias settings — {{alias}}",
+    "diagram_settings_title": "Alias settings - {{alias}}",
     "diagram_settings_source_title": "Source model settings",
     "diagram_settings_empty": "No mappings for this alias yet.",
     "diagram_tap_hint": "On touch devices: tap a source model, then tap an alias to link.",
@@ -968,7 +968,7 @@
     "generating_link": "Generating sign-in link…",
     "waiting_background_hint": "Closing this window won't stop sign-in",
     "restart_login": "Start over",
-    "success_saved_hint": "The credential is saved — manage it in Auth Files.",
+    "success_saved_hint": "The credential is saved - manage it in Auth Files.",
     "sign_up_prompt": "No account yet?",
     "copied": "Copied"
   },
@@ -1188,7 +1188,7 @@
         },
         "transientErrorCooldownSeconds": {
           "label": "Transient error cooldown (seconds)",
-          "hint": "Cooldown for upstream 408/500/502/503/504/520–526 errors. 0 uses the default 60 seconds; a negative value disables this cooldown."
+          "hint": "Cooldown for upstream 408/500/502/503/504/520-526 errors. 0 uses the default 60 seconds; a negative value disables this cooldown."
         },
         "videoResultAuthCacheTTL": {
           "label": "Video result credential cache TTL",
@@ -1554,7 +1554,7 @@
       },
       "validation": {
         "invalid_trusted_proxies": "Each trusted proxy must be a valid IP address or CIDR.",
-        "invalid_discovery_service_type": "Use _name._tcp: name must be 1–15 letters, digits or hyphens, with no leading or trailing hyphen.",
+        "invalid_discovery_service_type": "Use _name._tcp: name must be 1-15 letters, digits or hyphens, with no leading or trailing hyphen.",
         "validation_blocked": "Fix validation errors before saving",
         "invalid_duration": "Enter a valid duration, such as 30s or 3h",
         "positive_duration": "Enter a duration greater than zero",
@@ -1867,7 +1867,7 @@
     "no_matches_desc": "No plugins match the current search or filter.",
     "clear_filters": "Clear filters",
     "security_banner_title": "Third-party plugins run with full backend access",
-    "security_banner_text": "Plugins execute code inside the proxy service and can read your credentials and traffic. Only install plugins you trust — be especially careful with any plugin not published by the official router-for-me organization.",
+    "security_banner_text": "Plugins execute code inside the proxy service and can read your credentials and traffic. Only install plugins you trust - be especially careful with any plugin not published by the official router-for-me organization.",
     "badge_untrusted": "Third-party",
     "gate_title": "Install {{name}}",
     "gate_title_update": "Update {{name}}",
@@ -2236,7 +2236,7 @@
       "headersSection": "Request headers",
       "addHeader": "Add header",
       "excludedSection": "Excluded models",
-      "excludedDisabledNote": "“*” means the whole provider is disabled — use the Disabled switch above instead.",
+      "excludedDisabledNote": "“*” means the whole provider is disabled - use the Disabled switch above instead.",
       "cloakSection": "Cloak settings",
       "cloakMode": "Mode",
       "cloakStrict": "Strict mode",
