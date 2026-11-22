@@ -147,15 +147,30 @@ export const orderedMeters = (meters: QuotaMeterReading[]): QuotaMeterReading[] 
 ];
 
 /**
- * A meter as of `nowMs`: once its reset has passed, the window has refilled.
- * Short (5-hour) windows start again on the next request, so their next reset
- * is unknown; longer ones roll forward by whole periods.
+ * A window's first reset after `afterMs`, given one at `resetAtMs`. A window of
+ * a day or longer keeps its schedule and rolls forward by whole periods. A
+ * shorter (5-hour) one starts again on the next request, so once its reset has
+ * passed the next one is unknown (null).
  */
+export function nextResetAfter(
+  resetAtMs: number,
+  periodHours: number | null,
+  afterMs: number
+): number | null {
+  if (resetAtMs > afterMs) return resetAtMs;
+  const periodMs = (periodHours ?? 0) * 3_600_000;
+  if (periodMs < 24 * 3_600_000) return null;
+  let next = resetAtMs;
+  while (next <= afterMs) next += periodMs;
+  return next;
+}
+
+/** A meter as of `nowMs`: once its reset has passed, the window has refilled. */
 export function meterAsOf(meter: QuotaMeterReading, nowMs: number): QuotaMeterReading {
   if (meter.resetAtMs === null || meter.resetAtMs > nowMs) return meter;
-  const periodMs = (meter.periodHours ?? 0) * 3_600_000;
-  if (periodMs < 24 * 3_600_000) return { ...meter, remaining: 100, resetAtMs: null };
-  let next = meter.resetAtMs;
-  while (next <= nowMs) next += periodMs;
-  return { ...meter, remaining: 100, resetAtMs: next };
+  return {
+    ...meter,
+    remaining: 100,
+    resetAtMs: nextResetAfter(meter.resetAtMs, meter.periodHours, nowMs),
+  };
 }

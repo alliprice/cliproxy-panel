@@ -1,7 +1,8 @@
 /**
  * Plain-SVG area chart for the quota forecast: solid recorded history, a dotted
- * "Now" marker, a dashed projection and a hover readout. Gaps in history are
- * separate segments and are never joined.
+ * "Now" marker, a dashed projection (with a fainter dotted one to compare, when
+ * given) and a hover readout. Gaps in history are separate segments and are
+ * never joined.
  */
 
 import {
@@ -37,6 +38,11 @@ export interface QuotaForecastChartProps {
   yMax: number;
   history: ChartPoint[][];
   projection: ChartPoint[];
+  /**
+   * A second projection to compare with the main one (the window-average
+   * pace): a fainter dotted line with no fill, drawn under the main line.
+   */
+  comparison?: ChartPoint[] | null;
   accent: string;
   label: string;
   formatValue: (value: number) => string;
@@ -123,6 +129,7 @@ export function QuotaForecastChart(props: QuotaForecastChartProps) {
 
   const historySegments = history.map(clip).filter((segment) => segment.length > 0);
   const projected = clip(projection);
+  const compared = clip(props.comparison ?? []);
   const yTicks = (compact ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map(
     (fraction) => fraction * yMax
   );
@@ -227,10 +234,11 @@ export function QuotaForecastChart(props: QuotaForecastChartProps) {
             )
           )}
           {projected.length > 1 && (
-            <>
-              <path d={areaPath(projected)} fill={`url(#${gradientId})`} opacity={0.65} />
-              <path d={linePath(projected)} className={styles.projectionLine} />
-            </>
+            <path d={areaPath(projected)} fill={`url(#${gradientId})`} opacity={0.65} />
+          )}
+          {compared.length > 1 && <path d={linePath(compared)} className={styles.comparisonLine} />}
+          {projected.length > 1 && (
+            <path d={linePath(projected)} className={styles.projectionLine} />
           )}
 
           {reference && reference.value > 0 && (

@@ -8,6 +8,7 @@ import i18n from '@/i18n';
 import { normalizeAuthFilesResponse } from '@/services/api/authFiles';
 import { upstreamRateLimits } from '@/services/api/upstreamRateLimit';
 import { buildQuotaForecast } from '@/features/quota/forecast/forecastModel';
+import { forecastReadings } from '@/features/quota/forecast/forecastWindows';
 import { passiveQuotaFor } from '@/features/quota/forecast/passiveQuota';
 import { readQuotaMeters } from '@/features/quota/forecast/quotaMeters';
 import { formatClockOrWeekday } from '@/features/quota/display';
@@ -361,4 +362,54 @@ test('routing and note strings exist in all six locales', async () => {
     expect(messages.out_until).toContain('{{time}}');
     expect(messages.routing_requests).toContain('{{requests}}');
   }
+});
+
+describe('the provider forecast keeps a cooling credential', () => {
+  const entries = listed(benched, busy).map((file) => ({ file }));
+  const readings = (nowMs = NOW) =>
+    forecastReadings(
+      partitionForForecast(entries, (entry) => metersOf(entry.file), nowMs),
+      'session',
+      {
+        metersFor: (entry) => metersOf(entry.file),
+        credentialIdFor: (entry) => entry.file.name,
+        snapshotsFor: () => [],
+        nowMs,
+        lookbackMs: 5 * 60 * MINUTE_MS,
+      }
+    );
+
+  test('its reading holds 0% and comes back with its last reading', () => {
+    expect(readings()).toEqual([
+      expect.objectContaining({ credentialId: 'busy.json', remaining: 65 }),
+      expect.objectContaining({
+        credentialId: 'benched.json',
+        remaining: 0,
+        resetAtMs: FIVE_HOUR_RESET,
+        periodHours: 5,
+        cooldown: { untilMs: NOW + 231_000, returnRemaining: 3 },
+      }),
+    ]);
+    expect(readings()[0].cooldown).toBeUndefined();
+    // Once the cooldown has run out it is a usable credential like any other.
+    expect(readings(NOW + 232_000).map((reading) => reading.cooldown)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test('it counts as capacity at 0% and is out until its cooldown ends', () => {
+    const forecast = buildQuotaForecast({
+      live: readings(),
+      history: [],
+      nowMs: NOW,
+      rangeMs: DAY_MS,
+      lookbackMs: 5 * 60 * MINUTE_MS,
+      enoughMs: 30 * MINUTE_MS,
+    });
+    expect(forecast).toMatchObject({ capacity: 200, remaining: 65 });
+    expect(forecast.outNow).toEqual({ count: 1, backAtMs: NOW + 231_000 });
+    // The window reset (01:10:00) is before the cooldown end (01:10:20): back at 100%.
+    expect(forecast.nextReset).toEqual({ atMs: NOW + 231_000, gain: 100 });
+  });
 });

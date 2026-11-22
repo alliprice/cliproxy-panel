@@ -302,6 +302,16 @@
   stroke-linecap: butt;
 }
 
+/* The projection at the window-average pace: fainter and dotted, under the main one. */
+.comparisonLine {
+  fill: none;
+  stroke: var(--forecast-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+
 .referenceLine {
   stroke: var(--text-tertiary);
   stroke-width: 1.25;
@@ -324,6 +334,14 @@
 
   .legendDash {
     border-top-width: 1.5px;
+    border-top-style: dotted;
+  }
+}
+
+.legendComparison {
+  opacity: 0.7;
+
+  .legendDash {
     border-top-style: dotted;
   }
 }
@@ -548,6 +566,11 @@
   .tab {
     padding: 2px 0 4px;
     font-size: 12.5px;
+  }
+
+  .legend {
+    gap: 12px;
+    font-size: 12px;
   }
 
   > .chart {

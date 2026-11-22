@@ -2,9 +2,9 @@
  * Provider forecast panel: total remaining weekly quota, current drain rate, a
  * history + projection chart, the next reset and when the provider runs out.
  *
- * The drain rate works on the first load: it comes from each window's own
- * average since it opened, and switches to the panel's recorded history (the
- * backend stores none) once enough of it covers the lookback.
+ * The drain rate works on the first load: it comes from the serving accounts'
+ * window averages, and switches to the pace measured from the panel's recorded
+ * history (the backend stores none) once enough of it covers the lookback.
  */
 
 import { useMemo, useState } from 'react';
@@ -29,19 +29,17 @@ import {
   buildQuotaForecast,
   drainSeries,
   type ChartPoint,
-  type LiveReading,
   type QuotaForecast as QuotaForecastModel,
 } from '../forecast/forecastModel';
 import type { QuotaSnapshot } from '../forecast/quotaHistory';
 import {
-  meterForWindow,
-  resolveMeterRate,
+  forecastReadings,
   snapshotsForWindow,
   windowMeasurement,
   type ForecastWindow,
 } from '../forecast/forecastWindows';
 import type { SnapshotsFor } from '../hooks/useQuotaHistory';
-import { meterAsOf, readQuotaMeters } from '../forecast/quotaMeters';
+import { readQuotaMeters } from '../forecast/quotaMeters';
 import { partitionForForecast } from '../routing';
 import {
   stripCredentialExtension,
@@ -143,10 +141,12 @@ function outlookTone(forecast: QuotaForecastModel, accounts: number): OutlookTon
  *   form of `pace_out_now` whenever `count` is 1.
  * - At this pace: "first account out in 1d 4h", or "lasts until next reset".
  * - All out: "in 5d 2h"; or Unused at reset: "~120%".
+ *   While the window-average projection shows, both of these add its figure:
+ *   "first account out in 1d 4h; 2d 1h at window average".
  * - Next reset: "+200% in 18h" ("frees 200%" in the used view).
- * Accounts use their own window rate; "all out" comes from the projection.
+ * Every figure comes from the projection at the provider drain.
  */
-function Outlook({
+export function Outlook({
   forecast,
   accounts,
   nowMs,
@@ -168,6 +168,21 @@ function Outlook({
   const draining = accounts - outNow.count;
   const unused = Math.round(forecast.unusedAtResets);
   const tone = TONE_CLASS[outlookTone(forecast, accounts)];
+  const average = forecast.atWindowAverage;
+  /** A recent-pace figure with the window-average one after it, unless neither happens. */
+  const withAverage = (value: string, recentAtMs: number | null, averageAtMs: number | null) => {
+    if (!average || (recentAtMs === null && averageAtMs === null)) return value;
+    const atAverage =
+      averageAtMs === null
+        ? t('quota_management.pace_lasts_at_window_average')
+        : t(
+            recentAtMs === null
+              ? 'quota_management.pace_out_at_window_average'
+              : 'quota_management.pace_at_window_average',
+            { duration: duration(averageAtMs) }
+          );
+    return t('quota_management.pace_with_window_average', { recent: value, average: atAverage });
+  };
   const unusedDetail = forecast.unusedByAccount
     .map((item, index) =>
       t('quota_management.pace_unused_item', {
@@ -212,23 +227,35 @@ function Outlook({
       first !== null
         ? {
             label: t('quota_management.pace_label_pace'),
-            value: t(
-              draining > 1 ? 'quota_management.pace_first_out' : 'quota_management.pace_runs_out',
-              { duration: duration(first) }
+            value: withAverage(
+              t(
+                draining > 1 ? 'quota_management.pace_first_out' : 'quota_management.pace_runs_out',
+                { duration: duration(first) }
+              ),
+              first,
+              average?.firstRunsOutAtMs ?? null
             ),
             tone,
             detail: time(first),
           }
         : {
             label: t('quota_management.pace_label_pace'),
-            value: t('quota_management.pace_lasts'),
+            value: withAverage(
+              t('quota_management.pace_lasts'),
+              null,
+              average?.firstRunsOutAtMs ?? null
+            ),
             tone: styles.toneOk,
           }
     );
     if (allOut !== null) {
       rows.push({
         label: t('quota_management.pace_label_all_out'),
-        value: t('quota_management.pace_all_out', { duration: duration(allOut) }),
+        value: withAverage(
+          t('quota_management.pace_all_out', { duration: duration(allOut) }),
+          allOut,
+          average?.allOutAtMs ?? null
+        ),
         tone: styles.toneOut,
         detail: time(allOut),
       });
@@ -297,46 +324,29 @@ export function QuotaForecast(props: QuotaForecastProps) {
   const accent = FORECAST_ACCENTS[provider];
   const lookbackMs = lookbackHours * HOUR_MS;
 
-  // Credentials cooling down are left out: their last readings would claim
-  // capacity CLIProxyAPI cannot use until the cooldown ends.
-  const { usable, out } = useMemo(
+  // Credentials cooling down stay in the forecast (see forecastReadings): they
+  // count toward capacity at 0% and take no drain until their cooldown ends.
+  const partition = useMemo(
     () =>
       partitionForForecast(entries, (entry) => readQuotaMeters(entry.type, quotaFor(entry)), nowMs),
     [entries, nowMs, quotaFor]
   );
+  const { out } = partition;
 
-  // One forecast per window. Each account's rate is its measured rate when its
-  // readings cover enough time, else its window average (same rule as the rows).
+  // One forecast per window, with each account's rate from the rule the rows use.
   const views = useMemo(() => {
     const build = (window: ForecastWindow) => {
       // A 5-hour sawtooth is unreadable over a week: that view is the next 24h.
       const rangeMs = RANGE_DAYS[window] * DAY_MS;
       const pastMs = rangeMs / 6;
       const windowHistory = snapshotsForWindow(history, window);
-      const live = usable
-        .map((entry): LiveReading | null => {
-          const meter = meterForWindow(
-            readQuotaMeters(entry.type, quotaFor(entry)).map((item) => meterAsOf(item, nowMs)),
-            window
-          );
-          if (!meter) return null;
-          const credentialId = getQuotaCacheKey(entry.file);
-          const rate = resolveMeterRate(
-            meter,
-            snapshotsFor(credentialId, meter.id),
-            nowMs,
-            lookbackMs
-          );
-          return {
-            credentialId,
-            remaining: meter.remaining,
-            resetAtMs: meter.resetAtMs,
-            periodHours: meter.periodHours,
-            ratePerHour: rate.ratePerHour,
-            averagePerHour: rate.averagePerHour,
-          };
-        })
-        .filter((reading): reading is LiveReading => reading !== null);
+      const live = forecastReadings(partition, window, {
+        metersFor: (entry) => readQuotaMeters(entry.type, quotaFor(entry)),
+        credentialIdFor: (entry) => getQuotaCacheKey(entry.file),
+        snapshotsFor,
+        nowMs,
+        lookbackMs,
+      });
       const rule = windowMeasurement(window, lookbackMs);
       const forecast = buildQuotaForecast({
         live,
@@ -349,7 +359,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
       return { live, forecast, rangeMs, pastMs, windowHistory };
     };
     return { weekly: build('weekly'), session: build('session') };
-  }, [history, lookbackMs, nowMs, quotaFor, snapshotsFor, usable]);
+  }, [history, lookbackMs, nowMs, partition, quotaFor, snapshotsFor]);
 
   const hasSession = views.session.live.length > 0;
   const window: ForecastWindow =
@@ -459,6 +469,28 @@ export function QuotaForecast(props: QuotaForecastProps) {
         ? 'quota_management.forecast_tab_used'
         : `quota_management.forecast_tab_${tab}`
     );
+  // The projection's line, and the window-average comparison line when it is drawn.
+  const paceLegend = (
+    <>
+      <span className={styles.legendItem} style={{ color: accent }}>
+        <span className={styles.legendDash} />
+        {t(
+          forecast.atWindowAverage
+            ? 'quota_management.forecast_legend_recent_pace'
+            : 'quota_management.forecast_legend_projected'
+        )}
+      </span>
+      {forecast.atWindowAverage && (
+        <span
+          className={`${styles.legendItem} ${styles.legendComparison}`}
+          style={{ color: accent }}
+        >
+          <span className={styles.legendDash} />
+          {t('quota_management.forecast_legend_window_average')}
+        </span>
+      )}
+    </>
+  );
   const rateHint = measured
     ? t('quota_management.forecast_rate_source_measured', {
         // Whole hours read better than "17h 59m" for a coverage figure.
@@ -551,6 +583,9 @@ export function QuotaForecast(props: QuotaForecastProps) {
                 </button>
               ))}
             </div>
+            {split && chartIsRemaining && forecast.atWindowAverage && (
+              <div className={styles.legend}>{paceLegend}</div>
+            )}
             {!split && (
               <div className={styles.legend}>
                 {(chartIsRemaining || measured || drainPast.segments.length > 0) && (
@@ -566,10 +601,7 @@ export function QuotaForecast(props: QuotaForecastProps) {
                   </span>
                 )}
                 {chartIsRemaining ? (
-                  <span className={styles.legendItem} style={{ color: accent }}>
-                    <span className={styles.legendDash} />
-                    {t('quota_management.forecast_legend_projected')}
-                  </span>
+                  paceLegend
                 ) : (
                   <span className={`${styles.legendItem} ${styles.legendReference}`}>
                     <span className={styles.legendDash} />
@@ -617,6 +649,11 @@ export function QuotaForecast(props: QuotaForecastProps) {
                   : drainPast.segments
             }
             projection={chartIsRemaining ? asShown(forecast.projection) : []}
+            comparison={
+              chartIsRemaining && forecast.atWindowAverage
+                ? asShown(forecast.atWindowAverage.projection)
+                : null
+            }
             markers={chartIsRemaining ? chartMarkers : []}
             reference={
               chartIsRemaining

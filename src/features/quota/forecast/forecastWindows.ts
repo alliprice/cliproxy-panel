@@ -10,9 +10,9 @@
 
 import { HOUR_MS, MINUTE_MS } from '@/utils/time/durations';
 import { windowRatePerHour } from './burnRate';
-import { measureDrain } from './forecastModel';
+import { measureDrain, type LiveReading } from './forecastModel';
 import type { QuotaSnapshot } from './quotaHistory';
-import type { QuotaMeterReading } from './quotaMeters';
+import { meterAsOf, type QuotaMeterReading } from './quotaMeters';
 
 export type ForecastWindow = 'weekly' | 'session';
 
@@ -105,11 +105,7 @@ export function resolveMeterRate(
 
   const fromMs = Math.max(nowMs - rule.lookbackMs, exhausted?.startMs ?? -Infinity);
   const measured = measureDrain(snapshots, fromMs, untilMs);
-  if (
-    averagePerHour === null &&
-    measured &&
-    measured.coveredMs >= rule.enoughMs
-  ) {
+  if (averagePerHour === null && measured && measured.coveredMs >= rule.enoughMs) {
     return {
       ratePerHour: measured.ratePerHour,
       source: 'history',
@@ -123,4 +119,68 @@ export function resolveMeterRate(
     coveredMs: measured?.coveredMs ?? 0,
     averagePerHour,
   };
+}
+
+/** Where a forecast window's readings come from. */
+export interface ForecastReadingSource<T> {
+  /** A credential's meters as last read; they are taken as of `nowMs` here. */
+  metersFor: (entry: T) => QuotaMeterReading[];
+  credentialIdFor: (entry: T) => string;
+  /** Recorded snapshots of one credential's meter. */
+  snapshotsFor: (credentialId: string, meterId: string) => QuotaSnapshot[];
+  nowMs: number;
+  lookbackMs: number;
+}
+
+/**
+ * Each credential's reading for a forecast window, from partitionForForecast's
+ * split: the usable credentials and the cooling ones (`out`). A cooling
+ * credential stays in the forecast: it counts toward capacity at 0%, takes no
+ * drain until its cooldown ends, and comes back with its last reading (a full
+ * window if that window's reset has passed). Rates
+ * follow resolveMeterRate, the rule the account rows use. A credential with no
+ * meter for the window is left out.
+ */
+export function forecastReadings<T>(
+  credentials: { usable: T[]; out: { entry: T; untilMs: number | null }[] },
+  window: ForecastWindow,
+  source: ForecastReadingSource<T>
+): LiveReading[] {
+  const { nowMs, lookbackMs } = source;
+  const all = [
+    ...credentials.usable.map((entry) => ({ entry, cooldown: null })),
+    ...credentials.out.map(({ entry, untilMs }) => ({ entry, cooldown: { untilMs } })),
+  ];
+  return all.flatMap(({ entry, cooldown }): LiveReading[] => {
+    const lastRead = meterForWindow(source.metersFor(entry), window);
+    if (!lastRead) return [];
+    const meter = meterAsOf(lastRead, nowMs);
+    const credentialId = source.credentialIdFor(entry);
+    const rate = resolveMeterRate(
+      meter,
+      source.snapshotsFor(credentialId, meter.id),
+      nowMs,
+      lookbackMs
+    );
+    const reading: LiveReading = {
+      credentialId,
+      remaining: meter.remaining,
+      resetAtMs: meter.resetAtMs,
+      periodHours: meter.periodHours,
+      ratePerHour: rate.ratePerHour,
+      averagePerHour: rate.averagePerHour,
+    };
+    if (!cooldown) return [reading];
+    // The window as last read, even when its reset has passed during the
+    // cooldown: the projection then refills it at the return and keeps its
+    // later resets on schedule.
+    return [
+      {
+        ...reading,
+        remaining: 0,
+        resetAtMs: lastRead.resetAtMs,
+        cooldown: { untilMs: cooldown.untilMs, returnRemaining: lastRead.remaining },
+      },
+    ];
+  });
 }
