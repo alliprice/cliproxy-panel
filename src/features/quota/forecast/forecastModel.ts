@@ -198,15 +198,16 @@ export function aggregateHistory(
   const points: ChartPoint[] = [];
   let lastReadingMs: number | null = null;
   instants.forEach((t) => {
-    // Everything inside t's minute counts at t.
-    const edge = t + MINUTE_MS / 2;
+    // Everything toMinute puts in t's minute, [t - 30s, t + 30s), and nothing
+    // after untilMs, counts at t.
+    const edge = Math.min(t + MINUTE_MS / 2, untilMs + 1);
     let sum = 0;
     groups.forEach((group, credentialId) => {
       let index = cursors.get(credentialId) ?? -1;
-      while (index + 1 < group.length && group[index + 1].ts <= edge) index += 1;
+      while (index + 1 < group.length && group[index + 1].ts < edge) index += 1;
       cursors.set(credentialId, index);
       const snapshot = group[index];
-      if (snapshot) sum += valueAt(snapshot, edge);
+      if (snapshot) sum += valueAt(snapshot, edge - 1);
     });
     const isReading = readingInstants.has(t);
     const silence = isReading && lastReadingMs !== null && t - lastReadingMs > HISTORY_GAP_MS;

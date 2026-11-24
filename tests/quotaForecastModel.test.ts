@@ -874,6 +874,26 @@ describe('the recorded history line', () => {
     expect(line.find((point) => point.t === minute)?.v).toBe(99);
   });
 
+  test('puts a reset at half past the minute in the next minute', () => {
+    // a read 5% at 5s past the minute; its window resets at 30s past.
+    const minute = NOW - HOUR_MS;
+    const reset = minute + 30_000;
+    const history = [
+      weekly('a', 3, 15, reset),
+      weekly('a', (NOW - minute - 5_000) / HOUR_MS, 5, reset),
+    ];
+    const [line] = aggregateHistory(history, new Set(['a']), NOW);
+    expect(line.find((point) => point.t === minute)?.v).toBe(5);
+    expect(line.find((point) => point.t === minute + MINUTE_MS - 1)?.v).toBe(5);
+    expect(line.find((point) => point.t === minute + MINUTE_MS)?.v).toBe(100);
+  });
+
+  test('does not count a reset that is still ahead of now', () => {
+    const history = [weekly('a', 2, 15, NOW + 14_000), weekly('a', 1 / 3600, 5, NOW + 14_000)];
+    const [line] = aggregateHistory(history, new Set(['a']), NOW);
+    expect(line[line.length - 1]).toEqual({ t: NOW, v: 5 });
+  });
+
   test('counts only the accounts the forecast counts', () => {
     // 'gone' was removed: its readings stay in the browser's history.
     const history = [
