@@ -1,6 +1,7 @@
 /**
  * Dev-only: seed three days of quota history for the mock scenario, with a
- * six-hour gap so the chart shows that gaps stay gaps. Loaded through a
+ * six-hour silence so the charts show one: the remaining-quota line holds and
+ * then steps, and the drain line breaks. Loaded through a
  * dynamic import behind `import.meta.env.DEV`, so production drops it.
  */
 
