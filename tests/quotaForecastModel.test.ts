@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+  aggregateHistory,
   buildQuotaForecast,
   comparesWindowAverage,
   cooldownReturnMs,
@@ -760,5 +761,85 @@ describe('when the whole provider runs out', () => {
       const result = compare(10);
       expect(result.atWindowAverage?.allOutAtMs).toBeCloseTo(NOW + 6 * MINUTE_MS, -3);
     });
+  });
+});
+
+describe('the recorded history line', () => {
+  const weekly = (
+    credentialId: string,
+    hoursAgo: number,
+    remaining: number,
+    resetAtMs: number | null = null
+  ): QuotaSnapshot => ({
+    connection: 'test',
+    ts: NOW - hoursAgo * HOUR_MS,
+    credentialId,
+    provider: 'claude',
+    window: 'seven-day',
+    remaining,
+    resetAtMs,
+    primary: true,
+  });
+  /** Every half hour from `fromHours` ago to now. */
+  const halfHours = (fromHours: number) =>
+    Array.from({ length: fromHours * 2 + 1 }, (_, index) => fromHours - index / 2);
+  const both = new Set(['a', 'b']);
+
+  test('keeps an idle account at its last reading, however old', () => {
+    // a serves traffic and is read every half hour; b was read once, 8 hours ago.
+    const history = [
+      ...halfHours(8).map((hours, index) => weekly('a', hours, 50 - index)),
+      weekly('b', 8, 100),
+    ];
+    const [line, ...rest] = aggregateHistory(history, both);
+    expect(rest).toHaveLength(0);
+    expect(line).toHaveLength(17);
+    line.forEach((point, index) => expect(point.v).toBe(150 - index));
+  });
+
+  test('starts once every account has a reading', () => {
+    const history = [...halfHours(8).map((hours) => weekly('a', hours, 50)), weekly('b', 6, 100)];
+    const [line] = aggregateHistory(history, both);
+    expect(line[0]).toEqual({ t: NOW - 6 * HOUR_MS, v: 150 });
+  });
+
+  test("refills an idle account at its reset's time", () => {
+    const resetAt = NOW - 3 * HOUR_MS;
+    const history = [
+      ...halfHours(8).map((hours) => weekly('a', hours, 50)),
+      weekly('b', 8, 20, resetAt),
+    ];
+    const [line] = aggregateHistory(history, both);
+    expect(line.find((point) => point.t === resetAt - 1)?.v).toBe(70);
+    expect(line.find((point) => point.t === resetAt)?.v).toBe(150);
+    expect(line[line.length - 1].v).toBe(150);
+  });
+
+  test('holds across a silence and steps at the next reading', () => {
+    const history = [weekly('a', 10, 60), weekly('a', 0, 50)];
+    expect(aggregateHistory(history, new Set(['a']))).toEqual([
+      [
+        { t: NOW - 10 * HOUR_MS, v: 60 },
+        { t: NOW - 1, v: 60 },
+        { t: NOW, v: 50 },
+      ],
+    ]);
+  });
+
+  test('counts only the accounts the forecast counts', () => {
+    // 'gone' was removed: its readings stay in the browser's history.
+    const history = [
+      ...halfHours(2).map((hours) => weekly('a', hours, 40)),
+      ...halfHours(2).map((hours) => weekly('gone', hours, 100)),
+    ];
+    const result = buildQuotaForecast({
+      live: [reading('a', { remaining: 40 })],
+      history,
+      nowMs: NOW,
+      rangeMs: 3 * DAY_MS,
+      lookbackMs: 5 * HOUR_MS,
+      enoughMs: 30 * MINUTE_MS,
+    });
+    expect(result.history.flat().every((point) => point.v === 40)).toBe(true);
   });
 });

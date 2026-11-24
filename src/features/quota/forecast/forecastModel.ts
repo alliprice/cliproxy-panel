@@ -12,7 +12,10 @@ import { DAY_MS, HOUR_MS, MINUTE_MS } from '@/utils/time/durations';
 import type { QuotaSnapshot } from './quotaHistory';
 import { nextResetAfter } from './quotaMeters';
 
-/** Two readings further apart than this are a gap, never interpolated. */
+/**
+ * Two readings further apart than this are a gap, never interpolated: the
+ * drain chart breaks there, and the history line holds and then steps.
+ */
 export const HISTORY_GAP_MS = 3 * HOUR_MS;
 
 const PROJECTION_STEP_MS = 10 * MINUTE_MS;
@@ -145,44 +148,68 @@ const byCredential = (history: QuotaSnapshot[]) => {
 const valueAt = (snapshot: QuotaSnapshot, t: number) =>
   snapshot.resetAtMs !== null && snapshot.resetAtMs <= t ? 100 : snapshot.remaining;
 
+const toMinute = (ts: number) => Math.round(ts / MINUTE_MS) * MINUTE_MS;
+
 /**
- * Sum of every credential's latest fresh reading at each recorded instant.
- * Instants are bucketed to the minute; a silence longer than the gap splits
- * the line into separate segments.
+ * The provider total over recorded time: at each recorded instant, the sum of
+ * the latest reading of every credential in `credentialIds`, however old.
+ * An account that serves no traffic gets no new reading, and its quota does
+ * not change through the proxy while it is idle, so its last reading holds
+ * (a reset that passed counts as a refill, at the reset time).
+ *
+ * The line starts once every credential has a reading. Instants are bucketed
+ * to the minute. Readings further apart than HISTORY_GAP_MS are not
+ * interpolated: the total holds, then steps at the next reading.
  */
-export function aggregateHistory(history: QuotaSnapshot[]): ChartPoint[][] {
-  const groups = byCredential(history);
-  const instants = Array.from(
-    new Set(history.map((snapshot) => Math.round(snapshot.ts / MINUTE_MS) * MINUTE_MS))
-  ).sort((a, b) => a - b);
+export function aggregateHistory(
+  history: QuotaSnapshot[],
+  credentialIds: ReadonlySet<string>
+): ChartPoint[][] {
+  const groups = byCredential(
+    history.filter((snapshot) => credentialIds.has(snapshot.credentialId))
+  );
+  if (groups.size === 0) return [];
+  const startMs = Math.max(...Array.from(groups.values(), (group) => toMinute(group[0].ts)));
+
+  const readingInstants = new Set<number>();
+  groups.forEach((group) =>
+    group.forEach((snapshot) => {
+      const t = toMinute(snapshot.ts);
+      if (t >= startMs) readingInstants.add(t);
+    })
+  );
+  const endMs = Math.max(...readingInstants);
+
+  // A reset counts where it happened while its reading was still the latest.
+  const resets = new Set<number>();
+  groups.forEach((group) =>
+    group.forEach((snapshot, index) => {
+      const reset = snapshot.resetAtMs;
+      const next = group[index + 1];
+      if (reset === null || reset <= snapshot.ts || (next && reset >= next.ts)) return;
+      if (reset > startMs && reset < endMs) resets.add(reset);
+    })
+  );
+
+  const instants = Array.from(new Set([...readingInstants, ...resets])).sort((a, b) => a - b);
   const cursors = new Map<string, number>();
-
-  const segments: ChartPoint[][] = [];
-  let current: ChartPoint[] = [];
-  let previousT: number | null = null;
-
+  const points: ChartPoint[] = [];
   instants.forEach((t) => {
     let sum = 0;
-    let fresh = 0;
     groups.forEach((group, credentialId) => {
       let index = cursors.get(credentialId) ?? -1;
       while (index + 1 < group.length && group[index + 1].ts <= t + MINUTE_MS / 2) index += 1;
       cursors.set(credentialId, index);
       const snapshot = group[index];
-      if (!snapshot || t - snapshot.ts > HISTORY_GAP_MS) return;
-      sum += valueAt(snapshot, t);
-      fresh += 1;
+      if (snapshot) sum += valueAt(snapshot, t);
     });
-    if (fresh === 0) return;
-    if (previousT !== null && t - previousT > HISTORY_GAP_MS && current.length > 0) {
-      segments.push(current);
-      current = [];
+    const previous = points[points.length - 1];
+    if (previous && (resets.has(t) || t - previous.t > HISTORY_GAP_MS)) {
+      points.push({ t: t - 1, v: previous.v });
     }
-    current.push({ t, v: sum });
-    previousT = t;
+    points.push({ t, v: sum });
   });
-  if (current.length > 0) segments.push(current);
-  return segments;
+  return [points];
 }
 
 /** Two readings belong to one run: close enough in time and no reset between. */
@@ -611,7 +638,10 @@ export function buildQuotaForecast(input: ForecastInput): QuotaForecast {
     capacity: live.length * 100,
     remaining: live.reduce((total, reading) => total + reading.remaining, 0),
     drain,
-    history: aggregateHistory(history.filter((snapshot) => snapshot.ts <= nowMs)),
+    history: aggregateHistory(
+      history.filter((snapshot) => snapshot.ts <= nowMs),
+      new Set(live.map((reading) => reading.credentialId))
+    ),
     readings: new Set(history.filter((snapshot) => snapshot.ts <= nowMs).map((s) => s.ts)).size,
     projection: points,
     nextReset: resets.find((event) => event.gain > 0.5) ?? null,
