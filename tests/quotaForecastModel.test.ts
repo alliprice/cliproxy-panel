@@ -8,6 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   aggregateHistory,
   buildQuotaForecast,
+  clipToRange,
   comparesWindowAverage,
   cooldownReturnMs,
   currentDrain,
@@ -791,7 +792,7 @@ describe('the recorded history line', () => {
       ...halfHours(8).map((hours, index) => weekly('a', hours, 50 - index)),
       weekly('b', 8, 100),
     ];
-    const [line, ...rest] = aggregateHistory(history, both);
+    const [line, ...rest] = aggregateHistory(history, both, NOW);
     expect(rest).toHaveLength(0);
     expect(line).toHaveLength(17);
     line.forEach((point, index) => expect(point.v).toBe(150 - index));
@@ -799,7 +800,7 @@ describe('the recorded history line', () => {
 
   test('starts once every account has a reading', () => {
     const history = [...halfHours(8).map((hours) => weekly('a', hours, 50)), weekly('b', 6, 100)];
-    const [line] = aggregateHistory(history, both);
+    const [line] = aggregateHistory(history, both, NOW);
     expect(line[0]).toEqual({ t: NOW - 6 * HOUR_MS, v: 150 });
   });
 
@@ -809,7 +810,7 @@ describe('the recorded history line', () => {
       ...halfHours(8).map((hours) => weekly('a', hours, 50)),
       weekly('b', 8, 20, resetAt),
     ];
-    const [line] = aggregateHistory(history, both);
+    const [line] = aggregateHistory(history, both, NOW);
     expect(line.find((point) => point.t === resetAt - 1)?.v).toBe(70);
     expect(line.find((point) => point.t === resetAt)?.v).toBe(150);
     expect(line[line.length - 1].v).toBe(150);
@@ -817,13 +818,60 @@ describe('the recorded history line', () => {
 
   test('holds across a silence and steps at the next reading', () => {
     const history = [weekly('a', 10, 60), weekly('a', 0, 50)];
-    expect(aggregateHistory(history, new Set(['a']))).toEqual([
+    expect(aggregateHistory(history, new Set(['a']), NOW)).toEqual([
       [
         { t: NOW - 10 * HOUR_MS, v: 60 },
         { t: NOW - 1, v: 60 },
         { t: NOW, v: 50 },
       ],
     ]);
+  });
+
+  test('holds after a reset inside a silence until the next reading', () => {
+    const history = [weekly('a', 10, 20, NOW - 6 * HOUR_MS), weekly('a', 4, 60)];
+    expect(aggregateHistory(history, new Set(['a']), NOW)).toEqual([
+      [
+        { t: NOW - 10 * HOUR_MS, v: 20 },
+        { t: NOW - 6 * HOUR_MS - 1, v: 20 },
+        { t: NOW - 6 * HOUR_MS, v: 100 },
+        { t: NOW - 4 * HOUR_MS - 1, v: 100 },
+        { t: NOW - 4 * HOUR_MS, v: 60 },
+        { t: NOW, v: 60 },
+      ],
+    ]);
+  });
+
+  test('refills at a reset after the last reading, and runs to now', () => {
+    const history = [weekly('a', 2, 20, NOW - HOUR_MS)];
+    expect(aggregateHistory(history, new Set(['a']), NOW)).toEqual([
+      [
+        { t: NOW - 2 * HOUR_MS, v: 20 },
+        { t: NOW - HOUR_MS - 1, v: 20 },
+        { t: NOW - HOUR_MS, v: 100 },
+        { t: NOW, v: 100 },
+      ],
+    ]);
+  });
+
+  test("steps at a reset in the same minute as another account's last reading", () => {
+    const history = [weekly('a', 2, 20, NOW - HOUR_MS), weekly('b', 2, 50), weekly('b', 1, 50)];
+    const [line] = aggregateHistory(history, both, NOW);
+    expect(line.find((point) => point.t === NOW - HOUR_MS - 1)?.v).toBe(70);
+    expect(line.find((point) => point.t === NOW - HOUR_MS)?.v).toBe(150);
+  });
+
+  test('counts a reset before a reading in the same minute', () => {
+    // a was out until 10s past the minute and served again 10s later.
+    const minute = NOW - HOUR_MS;
+    const history = [
+      weekly('a', 2, 0, minute + 10_000),
+      weekly('a', (NOW - minute - 20_000) / HOUR_MS, 99),
+      weekly('a', 0, 95),
+    ];
+    const [line] = aggregateHistory(history, new Set(['a']), NOW);
+    expect(totalAt(line, NOW - 1.5 * HOUR_MS)).toBe(0);
+    expect(line.find((point) => point.t === minute - 1)?.v).toBe(0);
+    expect(line.find((point) => point.t === minute)?.v).toBe(99);
   });
 
   test('counts only the accounts the forecast counts', () => {
@@ -841,5 +889,39 @@ describe('the recorded history line', () => {
       enoughMs: 30 * MINUTE_MS,
     });
     expect(result.history.flat().every((point) => point.v === 40)).toBe(true);
+  });
+});
+
+describe('a chart line clipped to the visible range', () => {
+  test('keeps a hold that started before the range', () => {
+    const line = [
+      { t: NOW - 10 * HOUR_MS, v: 60 },
+      { t: NOW - 1, v: 60 },
+      { t: NOW, v: 50 },
+    ];
+    expect(clipToRange(line, NOW - 4 * HOUR_MS, NOW + HOUR_MS)).toEqual([
+      { t: NOW - 4 * HOUR_MS, v: 60 },
+      { t: NOW - 1, v: 60 },
+      { t: NOW, v: 50 },
+    ]);
+  });
+
+  test('adds a point on each edge a line crosses', () => {
+    const line = [
+      { t: 0, v: 0 },
+      { t: 10, v: 100 },
+    ];
+    expect(clipToRange(line, 2, 8)).toEqual([
+      { t: 2, v: 20 },
+      { t: 8, v: 80 },
+    ]);
+  });
+
+  test('leaves a line inside the range unchanged', () => {
+    const line = [
+      { t: 3, v: 1 },
+      { t: 5, v: 2 },
+    ];
+    expect(clipToRange(line, 2, 8)).toEqual(line);
   });
 });

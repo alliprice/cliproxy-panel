@@ -15,7 +15,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
-import type { ChartPoint } from '../forecast/forecastModel';
+import { clipToRange, type ChartPoint } from '../forecast/forecastModel';
 import { formatOutlookTime, resolveLocale } from '../display';
 import styles from './QuotaForecast.module.scss';
 
@@ -118,8 +118,7 @@ export function QuotaForecastChart(props: QuotaForecastChartProps) {
   const y = (value: number) => PAD.top + plotHeight - (Math.min(value, yMax) / yMax) * plotHeight;
   const baseline = y(0);
 
-  const clip = (points: ChartPoint[]) =>
-    points.filter((point) => point.t >= startMs && point.t <= endMs);
+  const clip = (points: ChartPoint[]) => clipToRange(points, startMs, endMs);
   const linePath = (points: ChartPoint[]) =>
     points.map((point, index) => `${index ? 'L' : 'M'}${x(point.t)},${y(point.v)}`).join('');
   const areaPath = (points: ChartPoint[]) =>
